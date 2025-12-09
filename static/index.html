@@ -900,6 +900,15 @@
       }
     }
 
+    function addUserFromPush(user) {
+      if (!user || !user.id) return;
+      if (usersCache.some(u => u.id === user.id)) return;
+      usersCache.push(user);
+      usersCache.sort((a, b) => a.id - b.id);
+      renderUsers(usersCache);
+      renderGroupMemberPicker();
+    }
+
     function connectWs() {
       if (!token) return;
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -921,6 +930,8 @@
             addGroupFromPush(data.group);
           } else if (data.type === 'group_deleted' && data.group_id) {
             handleGroupDeleted(data.group_id);
+          } else if (data.type === 'user_created' && data.user) {
+            addUserFromPush(data.user);
           }
           else if (data.type === 'signal') {
             if (data.signal_type === 'offer') handleOffer(data);

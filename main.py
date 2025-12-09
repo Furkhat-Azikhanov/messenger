@@ -5,6 +5,7 @@
 Запуск: `uvicorn main:app --reload`
 """
 
+import asyncio
 import hashlib
 import os
 import secrets
@@ -184,6 +185,11 @@ class ConnectionManager:
             except Exception:
                 self.disconnect(user_id, ws)
 
+    async def broadcast(self, message: dict) -> None:
+        # Рассылаем всем активным подключениям
+        for uid in list(self.connections.keys()):
+            await self.send_to_user(uid, message)
+
 
 manager = ConnectionManager()
 
@@ -282,6 +288,23 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    # Уведомляем всех онлайн-пользователей о новом участнике
+    try:
+        asyncio.create_task(
+            manager.broadcast(
+                {
+                    "type": "user_created",
+                    "user": {
+                        "id": user.id,
+                        "username": user.username,
+                        "created_at": user.created_at.isoformat(),
+                    },
+                }
+            )
+        )
+    except RuntimeError:
+        # Нет активного loop (например, в тестах) — пропускаем
+        pass
     return user
 
 
