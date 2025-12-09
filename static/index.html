@@ -185,9 +185,8 @@
       50% { opacity: 1; transform: scale(1); }
       100% { opacity: 0.6; transform: scale(0.9); }
     }
-    .call-area {
-      display: none;
-    }
+    .call-area { display: none; }
+    .call-area.active { display: grid; }
     .call-area .video-box {
       position: relative;
       background: #0b141a;
@@ -405,6 +404,7 @@
     const groupMenuBtn = document.getElementById('group-menu');
     const groupInfo = document.getElementById('group-info');
     const groupInfoClose = document.getElementById('group-info-close');
+    const callArea = document.querySelector('.call-area');
 
     let token = localStorage.getItem('token') || '';
     let me = null;
@@ -502,6 +502,7 @@
       }
       localStream = null;
       clearVideos();
+      if (callArea) callArea.classList.remove('active');
       if (notify && currentPeer) {
         sendSignal({ signal_type: 'end' });
       }
@@ -553,6 +554,7 @@
         await pc.setLocalDescription(offer);
         sendSignal({ signal_type: 'offer', sdp: offer, media });
         setChatStatus(media === 'video' ? 'Видео вызов...' : 'Аудио вызов...');
+        if (callArea) callArea.classList.add('active');
       } catch (e) {
         setChatStatus('Не удалось начать звонок: ' + e.message);
         cleanupCall();
@@ -574,6 +576,7 @@
         await pc.setLocalDescription(answer);
         sendSignal({ signal_type: 'answer', sdp: answer, media: data.media || 'audio' });
         setChatStatus('Соединение...');
+        if (callArea) callArea.classList.add('active');
       } catch (e) {
         setChatStatus('Ошибка при ответе на звонок: ' + e.message);
         cleanupCall(true);
