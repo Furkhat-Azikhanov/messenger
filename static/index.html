@@ -438,6 +438,7 @@
     const unreadGroups = new Map();  // groupId -> count
     const typingTimers = new Map();
     let isTypingSent = false;
+    let heartbeatTimer = null;
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -525,6 +526,20 @@
         sendSignal({ signal_type: 'end' });
       }
       setChatStatus('Голос/видео отключены');
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 20000);
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
     }
 
     function sendSignal(payload) {
@@ -962,14 +977,22 @@
       const wsUrl = `${scheme}://${location.host}/ws?token=${encodeURIComponent(token)}`;
       ws = new WebSocket(wsUrl);
       ws.onopen = () => setStatus('WS connected');
-      ws.onclose = () => { setStatus('WS disconnected'); ws = null; };
+      ws.onclose = () => { setStatus('WS disconnected'); ws = null; stopHeartbeat(); onlineUsers.clear(); renderUsers(usersCache); };
       ws.onerror = () => setStatus('WS error');
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'message') addIncomingMessage(data);
           else if (data.type === 'group_message') addIncomingGroupMessage(data);
-          else if (data.type === 'welcome') setStatus(`WS connected as id ${data.user_id}`);
+          else if (data.type === 'welcome') {
+            setStatus(`WS connected as id ${data.user_id}`);
+            if (data.online_ids) {
+              onlineUsers.clear();
+              data.online_ids.forEach((id) => onlineUsers.add(id));
+              renderUsers(usersCache);
+            }
+            startHeartbeat();
+          }
           else if (data.type === 'user_online') { onlineUsers.add(data.user_id); renderUsers(usersCache); }
           else if (data.type === 'user_offline') { onlineUsers.delete(data.user_id); renderUsers(usersCache); }
           else if (data.type === 'group_created' && data.group) {
@@ -1034,9 +1057,9 @@
         await loadGroups();
         hideAuth();
       } catch (e) {
-        setAuthStatus('Вход не удался: ' + e.message);
-      }
+      setAuthStatus('Вход не удался: ' + e.message);
     }
+  }
 
     async function loadMe() {
       try {

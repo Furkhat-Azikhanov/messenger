@@ -197,6 +197,11 @@ class ConnectionManager:
     def get_online_ids(self) -> List[int]:
         return list(self.online_users)
 
+    async def ensure_online(self, user_id: int) -> None:
+        if user_id not in self.online_users:
+            self.online_users.add(user_id)
+            await self.broadcast({"type": "user_online", "user_id": user_id})
+
 
 manager = ConnectionManager()
 
@@ -586,6 +591,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     "media": data.get("media"),
                 }
                 await manager.send_to_user(receiver_id, signal_payload)
+                continue
+
+            if data.get("type") == "ping":
+                await manager.ensure_online(user.id)
+                await websocket.send_json({"type": "pong"})
                 continue
 
             if data.get("type") == "typing":
