@@ -1,5 +1,5 @@
 // Простой service worker: кешируем статику для установки на главный экран.
-const CACHE_NAME = "messenger-cache-v3";
+const CACHE_NAME = "messenger-cache-v4";
 const ASSETS = [
   "/",
   "/static/index.html",
