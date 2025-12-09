@@ -27,7 +27,6 @@
       background: var(--bg);
       color: var(--text);
       overflow-x: hidden;
-      padding-bottom: 70px;
     }
     .app {
       min-height: 100dvh;
@@ -49,48 +48,10 @@
     .header-actions { display: flex; gap: 8px; }
     .header-actions button { background: #2a3942; color: var(--text); font-weight: 600; }
     main {
-      min-height: calc(100dvh - 100px);
-    }
-    .auth-screen {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: calc(100dvh - 60px);
-      padding: 20px;
-    }
-    .auth-card {
-      background: var(--panel);
-      border: 1px solid #1f2c33;
-      border-radius: 12px;
-      padding: 18px 20px;
-      max-width: 380px;
-      width: 100%;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
-    }
-    .auth-card h2 { margin: 0 0 10px; }
-    .tabbar {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 60px;
-      background: var(--panel-2);
-      border-top: 1px solid #1f2c33;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      z-index: 5;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100dvh - 54px);
     }
-    .tabbar button {
-      background: transparent;
-      border: none;
-      color: var(--sub);
-      font-weight: 700;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    .tabbar button.active { color: #e9edef; border-top: 3px solid var(--accent); }
-    .tab-panel { display: none; padding: 10px 12px 80px; min-height: calc(100dvh - 140px); }
-    .tab-panel.active { display: block; }
     .sidebar {
       background: var(--panel);
       border-right: 1px solid #1f2c33;
@@ -339,15 +300,6 @@
     }
     .mobile-only { display: none; }
     .desktop-only { display: inline-flex; }
-    .chat-layout {
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 12px;
-      min-height: calc(100dvh - 140px);
-    }
-    @media (max-width: 900px) {
-      .chat-layout { grid-template-columns: 1fr; }
-    }
 
     /* FIX: текст имён рядом с чекбоксом на iOS */
     #group-member-picker label,
@@ -363,93 +315,81 @@
   <div class="app">
     <header>
       <div id="status">Not connected</div>
+      <div class="header-actions">
+        <button class="mobile-only hidden" id="toggle-contacts">Контакты</button>
+        <button class="hidden" id="btn-logout">Выйти</button>
+      </div>
     </header>
-
-    <div id="auth-screen" class="auth-screen">
-      <div class="auth-card">
-        <h2>Вход / Регистрация</h2>
-        <label>Логин <input id="username" /></label>
-        <label>Пароль <input id="password" type="password" /></label>
-        <div class="row" style="margin-top:6px;">
-          <button class="secondary" id="btn-register">Регистрация</button>
-          <button id="btn-login">Войти</button>
+    <main>
+      <aside class="sidebar" id="sidebar">
+        <div class="auth">
+          <h2>Аккаунт</h2>
+          <label>Логин <input id="username" /></label>
+          <label>Пароль <input id="password" type="password" /></label>
+          <div class="row" style="margin-top:6px;">
+            <button class="secondary" id="btn-register">Регистрация</button>
+            <button id="btn-login">Войти</button>
+          </div>
+          <div class="status" id="auth-status"></div>
         </div>
-        <div class="status" id="auth-status"></div>
-      </div>
-    </div>
-
-    <div id="app-screen" class="hidden">
-      <div class="tab-panel active" data-tab="chats">
-        <div class="chat-layout" style="display:grid; grid-template-columns: 320px 1fr; gap:12px; min-height: calc(100dvh - 140px);">
-          <aside class="contacts" id="sidebar" style="background: var(--panel); border: 1px solid #1f2c33; border-radius: 10px; padding: 10px;">
-            <h2 style="padding:10px 4px; margin:0;">Чаты</h2>
-            <div class="status" style="padding:0 4px 6px;">Выбери пользователя, чтобы начать чат</div>
-            <div id="users"></div>
-            <div id="groups-block" style="margin-top:10px;">
-              <div class="status" style="padding:0 4px 6px;">Группы</div>
-              <div id="groups"></div>
-              <div style="padding:10px 4px;">
-                <input id="group-name" placeholder="Название группы" />
-                <div id="group-member-picker" style="max-height:140px; overflow-y:auto; border:1px solid #2a3942; border-radius:8px; padding:8px; margin-top:6px; text-align:left; color:#e9edef; font-size:13px; background:#111b21;"></div>
-                <button style="margin-top:6px;" id="btn-create-group">Создать группу</button>
-                <div class="status">По умолчанию вы добавляетесь сами. Отметьте участников из списка.</div>
-              </div>
+        <div class="contacts">
+          <h2 style="padding:10px 14px;">Контакты</h2>
+          <div class="status" style="padding:0 14px 6px;">Выбери пользователя, чтобы начать чат</div>
+          <div id="users"></div>
+          <div id="groups-block">
+            <div class="status" style="padding:0 14px 6px; margin-top:8px;">Группы</div>
+            <div id="groups"></div>
+            <div style="padding:10px 14px;">
+              <input id="group-name" placeholder="Название группы" />
+              <div id="group-member-picker" style="max-height:140px; overflow-y:auto; border:1px solid #2a3942; border-radius:8px; padding:8px; margin-top:6px; text-align:left; color:#e9edef; font-size:13px; background:#111b21;"></div>
+              <button style="margin-top:6px;" id="btn-create-group">Создать группу</button>
+              <div class="status">По умолчанию вы добавляетесь сами. Отметьте участников из списка.</div>
             </div>
-          </aside>
-
-          <section class="chat-area" style="border:1px solid #1f2c33; border-radius:10px; overflow:hidden;">
-            <div class="chat-header">
-              <div class="chat-meta">
-                <span class="name" id="chat-title">Чат</span>
-                <span class="hint" id="chat-status">Выбери собеседника</span>
-              </div>
-              <div class="call-buttons">
-                <button id="call-audio">Аудио</button>
-                <button id="call-video">Видео</button>
-                <button class="end" id="call-end">Сброс</button>
-                <button class="chat-menu hidden" id="group-menu">⋮</button>
-              </div>
-            </div>
-            <div class="group-info hidden" id="group-info">
-              <div class="members-list"></div>
-              <div class="close" id="group-info-close">×</div>
-            </div>
-
-            <div class="call-area">
-              <div class="video-box">
-                <video id="remoteVideo" playsinline autoplay></video>
-                <div class="video-label">Собеседник</div>
-              </div>
-              <div class="video-box">
-                <video id="localVideo" muted playsinline autoplay></video>
-                <div class="video-label">Вы</div>
-              </div>
-            </div>
-
-            <div id="chat"></div>
-
-            <div class="chat-input">
-              <input id="message-input" placeholder="Введите сообщение..." />
-              <button id="send-btn">Отправить</button>
-            </div>
-          </section>
+          </div>
         </div>
-      </div>
+      </aside>
 
-      <div class="tab-panel" data-tab="calls">
-        <h2>Звонки</h2>
-        <div id="call-history" class="card" style="background: var(--panel); border:1px solid #1f2c33; border-radius:10px; padding:10px;"></div>
-      </div>
+      <section class="chat-area">
+        <div class="chat-header">
+          <div class="chat-meta">
+            <span class="name" id="chat-title">Чат</span>
+            <span class="hint" id="chat-status">Выбери собеседника</span>
+          </div>
+          <div class="call-buttons">
+            <button id="call-audio">Аудио</button>
+            <button id="call-video">Видео</button>
+            <button class="end" id="call-end">Сброс</button>
+            <button class="chat-menu hidden" id="group-menu">⋮</button>
+          </div>
+        </div>
+        <div class="group-info hidden" id="group-info">
+          <div class="members-list"></div>
+          <div class="close" id="group-info-close">×</div>
+        </div>
 
-      <div class="tab-panel" data-tab="settings">
-        <h2>Настройки</h2>
-        <button id="settings-logout">Выйти</button>
-      </div>
+        <div class="call-area">
+          <div class="video-box">
+            <video id="remoteVideo" playsinline autoplay></video>
+            <div class="video-label">Собеседник</div>
+          </div>
+          <div class="video-box">
+            <video id="localVideo" muted playsinline autoplay></video>
+            <div class="video-label">Вы</div>
+          </div>
+        </div>
 
-      <div class="tabbar">
-        <button data-tab="chats" class="active">Чаты</button>
-        <button data-tab="calls">Звонки</button>
-        <button data-tab="settings">Настройки</button>
+        <div id="chat"></div>
+
+        <div class="chat-input">
+          <input id="message-input" placeholder="Введите сообщение..." />
+          <button id="send-btn">Отправить</button>
+        </div>
+      </section>
+    </main>
+    <div class="auth-overlay hidden" id="auth-overlay">
+      <div class="box">
+        <h2>Войдите или зарегистрируйтесь</h2>
+        <p>Чтобы начать переписку и звонки, авторизуйтесь в форме слева.</p>
       </div>
     </div>
   </div>
@@ -465,20 +405,15 @@
     const messageInput = document.getElementById('message-input');
     const remoteVideo = document.getElementById('remoteVideo');
     const localVideo = document.getElementById('localVideo');
-    const authScreen = document.getElementById('auth-screen');
-    const appScreen = document.getElementById('app-screen');
-    const authStatus = document.getElementById('auth-status');
-    const authBlock = authScreen; // для совместимости с showAuth/hideAuth
-    const logoutBtn = document.getElementById('settings-logout');
+    const authBlock = document.querySelector('.auth');
+    const logoutBtn = document.getElementById('btn-logout');
+    const authOverlay = document.getElementById('auth-overlay');
     const groupsBlock = document.getElementById('groups-block');
     const groupMemberPicker = document.getElementById('group-member-picker');
     const groupMenuBtn = document.getElementById('group-menu');
     const groupInfo = document.getElementById('group-info');
     const groupInfoClose = document.getElementById('group-info-close');
     const callArea = document.querySelector('.call-area');
-    const tabButtons = document.querySelectorAll('.tabbar button');
-    const tabPanels = document.querySelectorAll('.tab-panel');
-    const callHistoryEl = document.getElementById('call-history');
 
     let token = localStorage.getItem('token') || '';
     let me = null;
@@ -494,8 +429,6 @@
     let currentMedia = 'audio';
     const unreadUsers = new Set();
     const unreadGroups = new Set();
-    let activeTab = 'chats';
-    const callHistory = [];
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -503,8 +436,19 @@
       ],
     };
     const sidebar = document.getElementById('sidebar');
-    const toggleContactsBtn = null; // упразднено
-    function updateSidebar() {} // совместимость
+    const toggleContactsBtn = document.getElementById('toggle-contacts');
+    let isMobile = window.matchMedia('(max-width: 900px)').matches;
+
+    function updateSidebar(show) {
+      if (!isMobile) return;
+      if (show) sidebar.classList.add('show');
+      else sidebar.classList.remove('show');
+    }
+
+    window.matchMedia('(max-width: 900px)').addEventListener('change', (e) => {
+      isMobile = e.matches;
+      if (!isMobile) updateSidebar(false);
+    });
 
     function setStatus(text) { statusEl.textContent = text; }
     function setAuthStatus(text) { authStatus.textContent = text; }
@@ -520,20 +464,21 @@
       }
       return `User ${id}`;
     }
-
-    function switchTab(tab) {
-      activeTab = tab;
-      tabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-      tabPanels.forEach(panel => panel.classList.toggle('active', panel.dataset.tab === tab));
-    }
     function showAuth() {
-      if (authScreen) authScreen.classList.remove('hidden');
-      if (appScreen) appScreen.classList.add('hidden');
+      if (authBlock) authBlock.classList.remove('hidden');
+      if (logoutBtn) logoutBtn.classList.add('hidden');
+      if (toggleContactsBtn) toggleContactsBtn.classList.add('hidden');
+      if (groupsBlock) groupsBlock.classList.add('hidden');
+      // На мобильном сразу показываем сайдбар, чтобы форма была видна
+      updateSidebar(true);
     }
     function hideAuth() {
-      if (authScreen) authScreen.classList.add('hidden');
-      if (appScreen) appScreen.classList.remove('hidden');
-      switchTab('chats');
+      if (authBlock) authBlock.classList.add('hidden');
+      if (logoutBtn) logoutBtn.classList.remove('hidden');
+      if (toggleContactsBtn) toggleContactsBtn.classList.remove('hidden');
+      if (groupsBlock) groupsBlock.classList.remove('hidden');
+      // после входа уберём раскрытую панель на мобилке
+      updateSidebar(false);
     }
 
     function updateGroupMenuVisibility() {
@@ -609,7 +554,7 @@
     }
 
     async function startCall(media) {
-      if (!currentPeer || currentGroup) return setChatStatus('Выберите собеседника');
+      if (!currentPeer) return setChatStatus('Выберите собеседника');
       try {
         cleanupCall();
         await ensureLocalStream(media);
@@ -619,7 +564,6 @@
         sendSignal({ signal_type: 'offer', sdp: offer, media });
         setChatStatus(media === 'video' ? 'Видео вызов...' : 'Аудио вызов...');
         if (callArea) callArea.classList.add('active');
-        logCall({ peerId: currentPeer, media, direction: 'out' });
       } catch (e) {
         setChatStatus('Не удалось начать звонок: ' + e.message);
         cleanupCall();
@@ -642,7 +586,6 @@
         sendSignal({ signal_type: 'answer', sdp: answer, media: data.media || 'audio' });
         setChatStatus('Соединение...');
         if (callArea) callArea.classList.add('active');
-        logCall({ peerId: currentPeer, media: data.media || 'audio', direction: 'in' });
       } catch (e) {
         setChatStatus('Ошибка при ответе на звонок: ' + e.message);
         cleanupCall(true);
@@ -754,37 +697,6 @@
         p.textContent = 'Пока нет других пользователей';
         groupMemberPicker.appendChild(p);
       }
-    }
-
-    function renderCallHistory() {
-      if (!callHistoryEl) return;
-      if (!callHistory.length) {
-        callHistoryEl.innerHTML = '<div class="status">Пока нет звонков</div>';
-        return;
-      }
-      callHistoryEl.innerHTML = callHistory
-        .map(c => {
-          const time = new Date(c.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const dir = c.direction === 'out' ? 'Исходящий' : 'Входящий';
-          const type = c.media === 'video' ? 'Видео' : 'Аудио';
-          return `<div style="padding:8px; border-bottom:1px solid #1f2c33; display:flex; justify-content:space-between;">
-            <div>${c.name || 'Неизвестно'}</div>
-            <div style="color:#8696a0; font-size:12px;">${dir} · ${type} · ${time}</div>
-          </div>`;
-        })
-        .join('');
-    }
-
-    function logCall({ peerId, media, direction }) {
-      const name = usernameById(peerId);
-      callHistory.unshift({
-        peerId,
-        name,
-        media: media || 'audio',
-        direction,
-        ts: new Date().toISOString(),
-      });
-      renderCallHistory();
     }
 
     function renderGroups(groups) {
@@ -1039,8 +951,7 @@
       if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
         await api('/register', { method: 'POST', body: JSON.stringify({ username, password }) });
-        setAuthStatus('Готово, входим...');
-        await doLogin();
+        setAuthStatus('Готово, войдите');
       } catch (e) {
         setAuthStatus('Регистрация не удалась: ' + e.message);
       }
@@ -1097,7 +1008,7 @@
 
     document.getElementById('btn-register').onclick = doRegister;
     document.getElementById('btn-login').onclick = doLogin;
-    if (logoutBtn) logoutBtn.onclick = logout;
+    logoutBtn.onclick = logout;
     document.getElementById('btn-create-group').onclick = async () => {
       const name = document.getElementById('group-name').value.trim();
       const member_usernames = [];
@@ -1138,8 +1049,10 @@
         }
       }
     });
-    tabButtons.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
-    renderCallHistory();
+    toggleContactsBtn.addEventListener('click', () => {
+      const show = !sidebar.classList.contains('show');
+      updateSidebar(show);
+    });
 
     (async function init() {
       if (token) {
@@ -1182,7 +1095,7 @@
       setChatStatus('Выбери собеседника');
       localStorage.removeItem('token');
       showAuth();
-      switchTab('chats');
+      updateSidebar(false);
       if (groupInfo) groupInfo.classList.add('hidden');
       updateGroupMenuVisibility();
     }
