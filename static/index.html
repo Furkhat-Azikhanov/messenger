@@ -429,6 +429,8 @@
     let currentMedia = 'audio';
     const unreadUsers = new Set();
     const unreadGroups = new Set();
+    const typingTimers = new Map();
+    let isTypingSent = false;
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -754,7 +756,11 @@
         const meta = document.createElement('div');
         meta.className = 'bubble-info';
         const date = new Date(m.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        meta.textContent = `${usernameById(m.sender_id)} • ${date}`;
+        let ticks = '';
+        if (m.sender_id === me?.id) {
+          ticks = m.read_at ? ' ✓✓' : ' ✓';
+        }
+        meta.textContent = `${usernameById(m.sender_id)} • ${date}${ticks}`;
         wrap.appendChild(meta);
 
         chatEl.appendChild(wrap);
@@ -849,6 +855,7 @@
         renderMessages(user.id);
         setChatStatus('Онлайн чат');
         renderUsers(await api('/users'));
+        await markRead(user.id);
         updateSidebar(false);
         updateGroupMenuVisibility();
       } catch (e) {
@@ -882,6 +889,7 @@
       conversations[peerId].push(msg);
       if (peerId === currentPeer) {
         renderMessages(peerId);
+        markRead(peerId);
       } else if (msg.sender_id !== me.id) {
         unreadUsers.add(peerId);
         renderUsers(usersCache);
@@ -909,6 +917,22 @@
       renderGroupMemberPicker();
     }
 
+    async function markRead(peerId) {
+      try {
+        await api(`/messages/${peerId}/read`, { method: 'POST' });
+        const msgs = conversations[peerId] || [];
+        const now = new Date().toISOString();
+        msgs.forEach(m => {
+          if (m.sender_id === peerId && !m.read_at) {
+            m.read_at = now;
+          }
+        });
+        renderMessages(peerId);
+      } catch (e) {
+        // ignore
+      }
+    }
+
     function connectWs() {
       if (!token) return;
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -932,6 +956,23 @@
             handleGroupDeleted(data.group_id);
           } else if (data.type === 'user_created' && data.user) {
             addUserFromPush(data.user);
+          } else if (data.type === 'typing') {
+            const name = usernameById(data.sender_id);
+            if (data.is_typing) {
+              setChatStatus(`${name} печатает...`);
+              setTimeout(() => setChatStatus('Онлайн чат'), 3000);
+            } else {
+              setChatStatus('Онлайн чат');
+            }
+          } else if (data.type === 'message_read' && data.message_ids) {
+            const ids = data.message_ids;
+            const now = new Date().toISOString();
+            Object.keys(conversations).forEach(key => {
+              conversations[key].forEach(m => {
+                if (ids.includes(m.id)) m.read_at = now;
+              });
+            });
+            if (currentPeer) renderMessages(currentPeer);
           }
           else if (data.type === 'signal') {
             if (data.signal_type === 'offer') handleOffer(data);
@@ -1004,11 +1045,15 @@
         ws.send(JSON.stringify({ receiver_id: currentPeer, content }));
       }
       messageInput.value = '';
+      if (isTypingSent && currentPeer) {
+        ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: false }));
+        isTypingSent = false;
+      }
     }
 
     document.getElementById('btn-register').onclick = doRegister;
     document.getElementById('btn-login').onclick = doLogin;
-    logoutBtn.onclick = logout;
+    if (logoutBtn) logoutBtn.onclick = logout;
     document.getElementById('btn-create-group').onclick = async () => {
       const name = document.getElementById('group-name').value.trim();
       const member_usernames = [];
@@ -1032,6 +1077,18 @@
     };
     document.getElementById('send-btn').onclick = sendMessage;
     messageInput.addEventListener('keydown', (e) => {
+      if (currentPeer && !currentGroup) {
+        if (!isTypingSent) {
+          ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: true }));
+          isTypingSent = true;
+        }
+        clearTimeout(typingTimers.get(currentPeer));
+        const t = setTimeout(() => {
+          ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: false }));
+          isTypingSent = false;
+        }, 3000);
+        typingTimers.set(currentPeer, t);
+      }
       if (e.key === 'Enter') sendMessage();
     });
     document.getElementById('call-audio').onclick = () => startCall('audio');

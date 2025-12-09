@@ -10,7 +10,7 @@ import hashlib
 import os
 import secrets
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # --- База данных ---
@@ -46,6 +47,7 @@ class Message(Base):
     receiver_id = Column(Integer, nullable=False, index=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class Group(Base):
@@ -111,6 +113,7 @@ class MessageOut(BaseModel):
     receiver_id: int
     content: str
     created_at: datetime
+    read_at: Optional[datetime] = None
 
     class Config:
         orm_mode = True
@@ -258,6 +261,12 @@ def on_startup() -> None:
     # Создаем таблицы при запуске (для демо)
     os.makedirs(STATIC_DIR, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    # Добавляем read_at в messages, если нет
+    inspector = inspect(engine)
+    cols = [c["name"] for c in inspector.get_columns("messages")]
+    if "read_at" not in cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN read_at TIMESTAMP")
 
 
 @app.get("/", response_class=FileResponse)
@@ -348,6 +357,34 @@ def history(
     rows = db.execute(stmt).scalars().all()
     # Вернём в обратном порядке, чтобы шло по времени
     return list(reversed(rows))
+
+
+@app.post("/messages/{peer_id}/read")
+def mark_read(
+    peer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Отмечаем все входящие для текущего пользователя как прочитанные
+    stmt = (
+        select(Message).where(
+            Message.sender_id == peer_id,
+            Message.receiver_id == current_user.id,
+            Message.read_at.is_(None),
+        )
+    )
+    to_mark = db.execute(stmt).scalars().all()
+    now = datetime.utcnow()
+    ids: list[int] = []
+    for m in to_mark:
+        m.read_at = now
+        ids.append(m.id)
+    if ids:
+        db.commit()
+        # Уведомляем собеседника
+        payload = {"type": "message_read", "message_ids": ids, "peer_id": current_user.id}
+        asyncio.create_task(manager.send_to_user(peer_id, payload))
+    return {"marked": len(ids)}
 
 
 @app.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
@@ -537,6 +574,37 @@ async def websocket_endpoint(websocket: WebSocket):
                     "media": data.get("media"),
                 }
                 await manager.send_to_user(receiver_id, signal_payload)
+                continue
+
+            if data.get("type") == "typing":
+                receiver_id = int(data.get("receiver_id", 0))
+                if not receiver_id:
+                    await websocket.send_json({"type": "error", "message": "receiver_id required"})
+                    continue
+                typing_payload = {
+                    "type": "typing",
+                    "sender_id": user.id,
+                    "receiver_id": receiver_id,
+                    "is_typing": bool(data.get("is_typing")),
+                }
+                await manager.send_to_user(receiver_id, typing_payload)
+                continue
+
+            if data.get("type") == "message_read":
+                ids = data.get("message_ids") or []
+                if not ids:
+                    continue
+                # обновим read_at
+                now = datetime.utcnow()
+                msg_rows = db.execute(
+                    select(Message).where(
+                        Message.id.in_(ids),
+                        Message.sender_id == user.id,
+                    )
+                ).scalars().all()
+                for m in msg_rows:
+                    m.read_at = now
+                db.commit()
                 continue
 
             # Групповые сообщения
