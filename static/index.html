@@ -109,8 +109,9 @@
     .chat-area {
       background: var(--panel);
       position: relative;
-      display: grid;
-      grid-template-rows: 60px 1fr 70px;
+      display: flex;
+      flex-direction: column;
+      min-height: calc(100dvh - 54px);
     }
     .chat-header {
       background: var(--panel-2);
@@ -129,6 +130,7 @@
     .chat-menu { background: #2a3942; color: var(--text); border-radius: 6px; padding: 6px 8px; cursor: pointer; }
 
     #chat {
+      flex: 1;
       overflow-y: auto;
       padding: 16px 22px;
       display: flex;
@@ -191,8 +193,8 @@
       border-radius: 50%;
       background: #2ecc71;
     }
-    .call-area { display: none; }
-    .call-area.active { display: grid; }
+    .call-area { display: none; gap: 10px; padding: 10px 12px 6px; }
+    .call-area.active { display: flex; }
     .call-area .video-box {
       position: relative;
       background: #0b141a;
@@ -295,7 +297,7 @@
         grid-template-rows: 60px 1fr 70px;
       }
       .call-area {
-        grid-template-columns: 1fr;
+        flex-direction: column;
         padding: 8px 12px 4px;
       }
       .chat-header {
