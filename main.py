@@ -10,7 +10,7 @@ import hashlib
 import os
 import secrets
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -162,6 +162,7 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         self.connections: Dict[int, List[WebSocket]] = {}
+        self.online_users: Set[int] = set()
 
     async def connect(self, user_id: int, websocket: WebSocket) -> None:
         # Закрываем старые подключения, чтобы не было дублей
@@ -192,6 +193,9 @@ class ConnectionManager:
         # Рассылаем всем активным подключениям
         for uid in list(self.connections.keys()):
             await self.send_to_user(uid, message)
+
+    def get_online_ids(self) -> List[int]:
+        return list(self.online_users)
 
 
 manager = ConnectionManager()
@@ -554,7 +558,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
         await manager.connect(user.id, websocket)
         # Отправим приветствие
-        await websocket.send_json({"type": "welcome", "user_id": user.id})
+        manager.online_users.add(user.id)
+        await websocket.send_json(
+            {
+                "type": "welcome",
+                "user_id": user.id,
+                "online_ids": manager.get_online_ids(),
+            }
+        )
+        await manager.broadcast({"type": "user_online", "user_id": user.id})
 
         while True:
             data = await websocket.receive_json()
@@ -678,5 +690,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.send_to_user(receiver_id, payload)
     except WebSocketDisconnect:
         manager.disconnect(user.id if "user" in locals() else 0, websocket)
+        if "user" in locals():
+            if not manager.connections.get(user.id):
+                manager.online_users.discard(user.id)
+                asyncio.create_task(manager.broadcast({"type": "user_offline", "user_id": user.id}))
     finally:
         db.close()

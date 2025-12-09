@@ -170,20 +170,26 @@
     .group-info .member { display: block; color: #e9edef; }
     .group-info strong { color: #e9edef; }
     .group-info .close { cursor: pointer; color: #e9edef; padding: 2px 6px; background: #2a3942; border-radius: 6px; font-size: 11px; flex-shrink: 0; }
-    .notify-dot {
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      padding: 2px 6px;
+      margin-left: 6px;
+      border-radius: 10px;
+      background: #2ecc71;
+      color: #0b141a;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .online-dot {
       display: inline-block;
       width: 8px;
       height: 8px;
       margin-left: 6px;
       border-radius: 50%;
-      background: #ff4d4f;
-      animation: pulse 1.2s ease-in-out infinite;
-      vertical-align: middle;
-    }
-    @keyframes pulse {
-      0% { opacity: 0.6; transform: scale(0.9); }
-      50% { opacity: 1; transform: scale(1); }
-      100% { opacity: 0.6; transform: scale(0.9); }
+      background: #2ecc71;
     }
     .call-area { display: none; }
     .call-area.active { display: grid; }
@@ -424,11 +430,12 @@
     let usersCache = [];
     let groupsCache = [];
     const groupMembersCache = {};
+    const onlineUsers = new Set();
     let pc = null;
     let localStream = null;
     let currentMedia = 'audio';
-    const unreadUsers = new Set();
-    const unreadGroups = new Set();
+    const unreadUsers = new Map();   // userId -> count
+    const unreadGroups = new Map();  // groupId -> count
     const typingTimers = new Map();
     let isTypingSent = false;
     const rtcConfig = {
@@ -657,10 +664,17 @@
         .forEach(u => {
           const btn = document.createElement('button');
           btn.textContent = u.username;
-          if (unreadUsers.has(u.id)) {
-            const dot = document.createElement('span');
-            dot.className = 'notify-dot';
-            btn.appendChild(dot);
+          if (onlineUsers.has(u.id)) {
+            const dotOnline = document.createElement('span');
+            dotOnline.className = 'online-dot';
+            btn.appendChild(dotOnline);
+          }
+          const count = unreadUsers.get(u.id) || 0;
+          if (count > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = count;
+            btn.appendChild(badge);
           }
           btn.onclick = () => openChat(u);
           if (u.id === currentPeer && !currentGroup) btn.classList.add('active');
@@ -707,10 +721,12 @@
       groups.forEach(g => {
         const btn = document.createElement('button');
         btn.textContent = `# ${g.name}`;
-        if (unreadGroups.has(g.id)) {
-          const dot = document.createElement('span');
-          dot.className = 'notify-dot';
-          btn.appendChild(dot);
+        const count = unreadGroups.get(g.id) || 0;
+        if (count > 0) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = count;
+          btn.appendChild(badge);
         }
         btn.onclick = () => openGroup(g);
         if (currentGroup === g.id) btn.classList.add('active');
@@ -849,6 +865,7 @@
       setChatStatus('История загружается...');
       if (groupInfo) groupInfo.classList.add('hidden');
       unreadUsers.delete(user.id);
+      renderUsers(usersCache);
       try {
         const history = await api(`/messages/${user.id}`);
         conversations[user.id] = history;
@@ -869,6 +886,7 @@
       chatTitle.textContent = `# ${group.name}`;
       setChatStatus('История загружается...');
       unreadGroups.delete(group.id);
+      renderGroups(groupsCache);
       try {
         const history = await api(`/group_messages/${group.id}`);
         conversations[`g:${group.id}`] = history;
@@ -891,7 +909,8 @@
         renderMessages(peerId);
         markRead(peerId);
       } else if (msg.sender_id !== me.id) {
-        unreadUsers.add(peerId);
+        const prev = unreadUsers.get(peerId) || 0;
+        unreadUsers.set(peerId, prev + 1);
         renderUsers(usersCache);
       }
     }
@@ -903,7 +922,8 @@
       if (currentGroup === msg.group_id) {
         renderGroupMessages(msg.group_id);
       } else if (msg.sender_id !== me.id) {
-        unreadGroups.add(msg.group_id);
+        const prev = unreadGroups.get(msg.group_id) || 0;
+        unreadGroups.set(msg.group_id, prev + 1);
         renderGroups(groupsCache);
       }
     }
@@ -950,6 +970,8 @@
           if (data.type === 'message') addIncomingMessage(data);
           else if (data.type === 'group_message') addIncomingGroupMessage(data);
           else if (data.type === 'welcome') setStatus(`WS connected as id ${data.user_id}`);
+          else if (data.type === 'user_online') { onlineUsers.add(data.user_id); renderUsers(usersCache); }
+          else if (data.type === 'user_offline') { onlineUsers.delete(data.user_id); renderUsers(usersCache); }
           else if (data.type === 'group_created' && data.group) {
             addGroupFromPush(data.group);
           } else if (data.type === 'group_deleted' && data.group_id) {
