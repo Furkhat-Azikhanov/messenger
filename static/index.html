@@ -54,6 +54,22 @@
       min-height: calc(100dvh - 54px);
       align-items: stretch;
     }
+    .auth-landing {
+      display: none;
+      min-height: calc(100dvh - 54px);
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .auth-landing .card {
+      background: var(--panel);
+      border: 1px solid #1f2c33;
+      border-radius: 12px;
+      padding: 18px 20px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    }
     .sidebar {
       background: var(--panel);
       border-right: 1px solid #1f2c33;
@@ -331,6 +347,18 @@
         <button class="hidden" id="btn-logout">Выйти</button>
       </div>
     </header>
+    <div id="auth-landing" class="auth-landing">
+      <div class="card">
+        <h2>Вход / Регистрация</h2>
+        <label>Логин <input id="landing-username" /></label>
+        <label>Пароль <input id="landing-password" type="password" /></label>
+        <div class="row" style="margin-top:6px;">
+          <button class="secondary" id="landing-register">Регистрация</button>
+          <button id="landing-login">Войти</button>
+        </div>
+        <div class="status" id="landing-auth-status"></div>
+      </div>
+    </div>
     <main>
       <aside class="sidebar" id="sidebar">
         <div class="auth">
@@ -417,6 +445,8 @@
     const remoteVideo = document.getElementById('remoteVideo');
     const localVideo = document.getElementById('localVideo');
     const authBlock = document.querySelector('.auth');
+    const authLanding = document.getElementById('auth-landing');
+    const landingAuthStatus = document.getElementById('landing-auth-status');
     const logoutBtn = document.getElementById('btn-logout');
     const authOverlay = document.getElementById('auth-overlay');
     const groupsBlock = document.getElementById('groups-block');
@@ -467,7 +497,10 @@
     });
 
     function setStatus(text) { statusEl.textContent = text; }
-    function setAuthStatus(text) { authStatus.textContent = text; }
+    function setAuthStatus(text) {
+      authStatus.textContent = text;
+      if (landingAuthStatus) landingAuthStatus.textContent = text;
+    }
     function setChatStatus(text) { chatStatus.textContent = text; }
     function usernameById(id, groupId = null) {
       if (!id) return 'User';
@@ -482,6 +515,8 @@
     }
     function showAuth() {
       if (authBlock) authBlock.classList.remove('hidden');
+      if (authLanding) authLanding.style.display = 'flex';
+      if (document.querySelector('main')) document.querySelector('main').style.display = 'none';
       if (logoutBtn) logoutBtn.classList.add('hidden');
       if (toggleContactsBtn) toggleContactsBtn.classList.add('hidden');
       if (groupsBlock) groupsBlock.classList.add('hidden');
@@ -490,6 +525,8 @@
     }
     function hideAuth() {
       if (authBlock) authBlock.classList.add('hidden');
+      if (authLanding) authLanding.style.display = 'none';
+      if (document.querySelector('main')) document.querySelector('main').style.display = 'grid';
       if (logoutBtn) logoutBtn.classList.remove('hidden');
       if (toggleContactsBtn) toggleContactsBtn.classList.remove('hidden');
       if (groupsBlock) groupsBlock.classList.remove('hidden');
@@ -1053,21 +1090,31 @@
       };
     }
 
+    function getAuthValues() {
+      const u1 = document.getElementById('landing-username')?.value || '';
+      const p1 = document.getElementById('landing-password')?.value || '';
+      const u2 = document.getElementById('username')?.value || '';
+      const p2 = document.getElementById('password')?.value || '';
+      return {
+        username: (u1 || u2).trim(),
+        password: (p1 || p2).trim(),
+      };
+    }
+
     async function doRegister() {
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value.trim();
+      const { username, password } = getAuthValues();
       if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
         await api('/register', { method: 'POST', body: JSON.stringify({ username, password }) });
-        setAuthStatus('Готово, войдите');
+        setAuthStatus('Готово, входим...');
+        await doLogin();
       } catch (e) {
         setAuthStatus('Регистрация не удалась: ' + e.message);
       }
     }
 
     async function doLogin() {
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value.trim();
+      const { username, password } = getAuthValues();
       if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
         const res = await api('/login', { method: 'POST', body: JSON.stringify({ username, password }) });
@@ -1079,9 +1126,9 @@
         await loadGroups();
         hideAuth();
       } catch (e) {
-      setAuthStatus('Вход не удался: ' + e.message);
+        setAuthStatus('Вход не удался: ' + e.message);
+      }
     }
-  }
 
     async function loadMe() {
       try {
@@ -1112,6 +1159,10 @@
 
     document.getElementById('btn-register').onclick = doRegister;
     document.getElementById('btn-login').onclick = doLogin;
+    const landingRegister = document.getElementById('landing-register');
+    const landingLogin = document.getElementById('landing-login');
+    if (landingRegister) landingRegister.onclick = doRegister;
+    if (landingLogin) landingLogin.onclick = doLogin;
     if (logoutBtn) logoutBtn.onclick = logout;
     document.getElementById('btn-create-group').onclick = async () => {
       const name = document.getElementById('group-name').value.trim();
