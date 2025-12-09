@@ -262,6 +262,16 @@ def root():
     return FileResponse(os.devnull)
 
 
+@app.head("/")
+def root_head():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     existing = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
