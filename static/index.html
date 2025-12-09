@@ -301,14 +301,13 @@
     .mobile-only { display: none; }
     .desktop-only { display: inline-flex; }
 
-    /* FIX: iOS Safari не красит текст возле checkbox */
-    #group-member-picker label {
-      color: #e9edef !important;
+    /* FIX: текст имён рядом с чекбоксом на iOS */
+    #group-member-picker label,
+    #group-member-picker label span {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
     }
 
-    #group-member-picker label span {
-      color: #e9edef !important;
-    }
 
   </style>
 </head>
