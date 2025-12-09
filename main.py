@@ -310,7 +310,7 @@ def health():
 
 
 @app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     existing = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
@@ -320,22 +320,16 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     # Уведомляем всех онлайн-пользователей о новом участнике
-    try:
-        asyncio.create_task(
-            manager.broadcast(
-                {
-                    "type": "user_created",
-                    "user": {
-                        "id": user.id,
-                        "username": user.username,
-                        "created_at": user.created_at.isoformat(),
-                    },
-                }
-            )
-        )
-    except RuntimeError:
-        # Нет активного loop (например, в тестах) — пропускаем
-        pass
+    await manager.broadcast(
+        {
+            "type": "user_created",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "created_at": user.created_at.isoformat(),
+            },
+        }
+    )
     return user
 
 
