@@ -1039,7 +1039,8 @@
       if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
         await api('/register', { method: 'POST', body: JSON.stringify({ username, password }) });
-        setAuthStatus('Готово, войдите');
+        setAuthStatus('Готово, входим...');
+        await doLogin();
       } catch (e) {
         setAuthStatus('Регистрация не удалась: ' + e.message);
       }
