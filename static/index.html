@@ -530,8 +530,8 @@
       if (logoutBtn) logoutBtn.classList.remove('hidden');
       if (toggleContactsBtn) toggleContactsBtn.classList.remove('hidden');
       if (groupsBlock) groupsBlock.classList.remove('hidden');
-      // после входа уберём раскрытую панель на мобилке
-      updateSidebar(false);
+      // после входа на мобилке сразу показываем контакты
+      updateSidebar(isMobile ? true : false);
     }
 
     function updateGroupMenuVisibility() {
