@@ -360,7 +360,7 @@ def history(
 
 
 @app.post("/messages/{peer_id}/read")
-def mark_read(
+async def mark_read(
     peer_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -383,7 +383,7 @@ def mark_read(
         db.commit()
         # Уведомляем собеседника
         payload = {"type": "message_read", "message_ids": ids, "peer_id": current_user.id}
-        asyncio.create_task(manager.send_to_user(peer_id, payload))
+        await manager.send_to_user(peer_id, payload)
     return {"marked": len(ids)}
 
 
