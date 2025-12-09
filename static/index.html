@@ -437,6 +437,7 @@
     const unreadUsers = new Map();   // userId -> count
     const unreadGroups = new Map();  // groupId -> count
     const typingTimers = new Map();
+    const groupTypingTimers = new Map();
     let isTypingSent = false;
     let heartbeatTimer = null;
     const rtcConfig = {
@@ -814,7 +815,12 @@
         const meta = document.createElement('div');
         meta.className = 'bubble-info';
         const date = new Date(m.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}`;
+        let ticks = '';
+        if (isMe) {
+          const readers = m.read_by || [];
+          ticks = readers.length ? ' ✓✓' : ' ✓';
+        }
+        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}${ticks}`;
         wrap.appendChild(meta);
 
         chatEl.appendChild(wrap);
@@ -911,6 +917,7 @@
         updateSidebar(false);
         updateGroupMenuVisibility();
         if (groupInfo) groupInfo.classList.add('hidden'); // покажем участников только по клику
+        await markGroupRead(group.id);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
@@ -936,10 +943,19 @@
       conversations[key].push(msg);
       if (currentGroup === msg.group_id) {
         renderGroupMessages(msg.group_id);
+        markGroupRead(msg.group_id);
       } else if (msg.sender_id !== me.id) {
         const prev = unreadGroups.get(msg.group_id) || 0;
         unreadGroups.set(msg.group_id, prev + 1);
         renderGroups(groupsCache);
+      }
+    }
+
+    async function markGroupRead(groupId) {
+      try {
+        await api(`/group_messages/${groupId}/read`, { method: 'POST' });
+      } catch (e) {
+        // ignore
       }
     }
 
@@ -1001,6 +1017,7 @@
             handleGroupDeleted(data.group_id);
           } else if (data.type === 'user_created' && data.user) {
             addUserFromPush(data.user);
+            loadUsers(); // синхронизируем список на всякий случай
           } else if (data.type === 'typing') {
             const name = usernameById(data.sender_id);
             if (data.is_typing) {
@@ -1078,14 +1095,6 @@
       if (!content) return;
       if (currentGroup) {
         ws.send(JSON.stringify({ type: 'group_message', group_id: currentGroup, content }));
-        // моментально добавить в локальную историю, чтобы не ждать эхо
-        addIncomingGroupMessage({
-          group_id: currentGroup,
-          sender_id: me.id,
-          content,
-          created_at: new Date().toISOString(),
-          id: Date.now()
-        });
       } else {
         ws.send(JSON.stringify({ receiver_id: currentPeer, content }));
       }
@@ -1133,6 +1142,13 @@
           isTypingSent = false;
         }, 3000);
         typingTimers.set(currentPeer, t);
+      } else if (currentGroup) {
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'group_typing', group_id: currentGroup, is_typing: true }));
+        clearTimeout(groupTypingTimers.get(currentGroup));
+        const t = setTimeout(() => {
+          ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'group_typing', group_id: currentGroup, is_typing: false }));
+        }, 3000);
+        groupTypingTimers.set(currentGroup, t);
       }
       if (e.key === 'Enter') sendMessage();
     });

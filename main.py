@@ -78,6 +78,15 @@ class GroupMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class GroupMessageRead(Base):
+    __tablename__ = "group_message_reads"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    user_id = Column(Integer, index=True, nullable=False)
+    read_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # --- Модели запросов/ответов ---
 class RegisterRequest(BaseModel):
     username: str
@@ -140,6 +149,7 @@ class GroupMessageOut(BaseModel):
     sender_id: int
     content: str
     created_at: datetime
+    read_by: List[int] = []
 
     class Config:
         orm_mode = True
@@ -276,6 +286,9 @@ def on_startup() -> None:
     if "read_at" not in cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN read_at TIMESTAMP")
+    # Создаем таблицу group_message_reads, если отсутствует
+    if "group_message_reads" not in inspector.get_table_names():
+        GroupMessageRead.__table__.create(bind=engine)
 
 
 @app.get("/", response_class=FileResponse)
@@ -544,7 +557,78 @@ def group_history(
         .limit(limit)
     )
     msgs = db.execute(stmt).scalars().all()
+    # добавим read_by для сообщений текущего пользователя
+    ids = [m.id for m in msgs]
+    read_map = {}
+    if ids:
+        reads = db.execute(
+            select(GroupMessageRead.message_id, GroupMessageRead.user_id).where(
+                GroupMessageRead.message_id.in_(ids)
+            )
+        ).all()
+        for mid, uid in reads:
+            read_map.setdefault(mid, []).append(uid)
+    for m in msgs:
+        m.read_by = read_map.get(m.id, [])
     return list(reversed(msgs))
+
+
+@app.post("/group_messages/{group_id}/read")
+async def group_mark_read(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Проверяем участие
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+
+    # Находим непрочитанные сообщения группы (не свои)
+    msgs = db.execute(
+        select(GroupMessage.id, GroupMessage.sender_id)
+        .where(
+            GroupMessage.group_id == group_id,
+            GroupMessage.sender_id != current_user.id,
+        )
+    ).all()
+    to_mark = []
+    for mid, sender_id in msgs:
+        exists = db.execute(
+            select(GroupMessageRead).where(
+                GroupMessageRead.message_id == mid, GroupMessageRead.user_id == current_user.id
+            )
+        ).scalar_one_or_none()
+        if not exists:
+            to_mark.append((mid, sender_id))
+
+    if not to_mark:
+        return {"marked": 0}
+
+    now = datetime.utcnow()
+    for mid, _ in to_mark:
+        db.add(GroupMessageRead(message_id=mid, user_id=current_user.id, read_at=now))
+    db.commit()
+
+    # Оповещаем авторов сообщений
+    for mid, sender_id in to_mark:
+        await manager.send_to_user(
+            sender_id,
+            {
+                "type": "group_message_read",
+                "group_id": group_id,
+                "message_ids": [mid],
+                "reader_id": current_user.id,
+            },
+        )
+    return {"marked": len(to_mark)}
 
 
 @app.websocket("/ws")
@@ -661,6 +745,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "sender_id": gmsg.sender_id,
                     "content": gmsg.content,
                     "created_at": gmsg.created_at.isoformat(),
+                    "read_by": [],
                 }
                 # Рассылаем всем участникам группы, кто онлайн
                 member_ids = (
@@ -670,6 +755,25 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 for uid in member_ids:
                     await manager.send_to_user(uid, payload)
+                continue
+            if data.get("type") == "group_typing":
+                group_id = int(data.get("group_id", 0))
+                is_typing = bool(data.get("is_typing"))
+                if not group_id:
+                    await websocket.send_json({"type": "error", "message": "group_id required"})
+                    continue
+                member_ids = (
+                    db.execute(select(GroupMember.user_id).where(GroupMember.group_id == group_id))
+                    .scalars()
+                    .all()
+                )
+                for uid in member_ids:
+                    if uid == user.id:
+                        continue
+                    await manager.send_to_user(
+                        uid,
+                        {"type": "group_typing", "group_id": group_id, "sender_id": user.id, "is_typing": is_typing},
+                    )
                 continue
 
             # Обычные сообщения чата сохраняем
