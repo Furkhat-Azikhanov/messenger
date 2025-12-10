@@ -479,6 +479,7 @@
     let isTypingSent = false;
     let heartbeatTimer = null;
     const audioCtx = window.AudioContext ? new AudioContext() : null;
+    let audioUnlocked = false;
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -518,6 +519,7 @@
     }
     function playBeep() {
       if (!audioCtx) return;
+      if (!audioUnlocked) return;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
@@ -541,7 +543,23 @@
         try { new Notification(title, { body }); } catch (_) {}
       } else if (Notification.permission === 'default') {
         requestNotifyPermission();
+      } else {
+        // На мобильных Safari уведомления чаще всего недоступны без push, делаем вибрацию
+        if (navigator.vibrate) navigator.vibrate(150);
       }
+    }
+
+    function ensureAudioUnlocked() {
+      if (!audioCtx || audioUnlocked) return;
+      const resume = () => {
+        audioCtx.resume().then(() => {
+          audioUnlocked = true;
+          document.removeEventListener('touchstart', resume, true);
+          document.removeEventListener('click', resume, true);
+        }).catch(() => {});
+      };
+      document.addEventListener('touchstart', resume, true);
+      document.addEventListener('click', resume, true);
     }
     function usernameById(id, groupId = null) {
       if (!id) return 'User';
@@ -1325,6 +1343,8 @@
         }
       }
     });
+    ensureAudioUnlocked();
+    requestNotifyPermission();
     toggleContactsBtn.addEventListener('click', () => {
       const show = !sidebar.classList.contains('show');
       updateSidebar(show);
