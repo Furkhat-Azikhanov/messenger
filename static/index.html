@@ -308,6 +308,30 @@
       color: #0f9af0;
       word-break: break-all;
     }
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      max-width: 240px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .file-chip.hidden { display: none; }
+    .file-chip button {
+      background: transparent;
+      color: var(--text);
+      border: none;
+      padding: 0 4px;
+      cursor: pointer;
+      font-weight: 700;
+    }
 
     .auth-overlay {
       display: none; /* отключаем оверлей, чтобы не перекрывал форму */
@@ -453,6 +477,7 @@
         <div class="chat-input">
           <label for="file-input" class="attach-label" title="Прикрепить файл">📎</label>
           <input type="file" id="file-input" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" />
+          <div id="file-chip" class="file-chip hidden"></div>
           <input id="message-input" placeholder="Введите сообщение..." />
           <button id="send-btn">Отправить</button>
         </div>
@@ -488,6 +513,8 @@
     const groupInfo = document.getElementById('group-info');
     const groupInfoClose = document.getElementById('group-info-close');
     const callArea = document.querySelector('.call-area');
+    const fileInputEl = document.getElementById('file-input');
+    const fileChip = document.getElementById('file-chip');
 
     let token = localStorage.getItem('token') || '';
     let me = null;
@@ -1365,8 +1392,7 @@
 
     async function sendMessage() {
       if (!currentPeer && !currentGroup) return setChatStatus('Выберите собеседника или группу');
-      const fileInput = document.getElementById('file-input');
-      const file = fileInput?.files?.[0];
+      const file = fileInputEl?.files?.[0];
       const content = messageInput.value.trim();
       let uploadMeta = null;
       try {
@@ -1384,7 +1410,11 @@
             return;
           }
           uploadMeta = await res.json();
-          fileInput.value = '';
+          fileInputEl.value = '';
+          if (fileChip) {
+            fileChip.textContent = '';
+            fileChip.classList.add('hidden');
+          }
         }
       } catch (e) {
         setChatStatus('Ошибка загрузки файла: ' + e.message);
@@ -1446,6 +1476,27 @@
       }
     };
     document.getElementById('send-btn').onclick = sendMessage;
+    if (fileInputEl) {
+      fileInputEl.addEventListener('change', () => {
+        const f = fileInputEl.files?.[0];
+        if (f && fileChip) {
+          const sizeMb = (f.size / (1024 * 1024)).toFixed(1);
+          fileChip.textContent = `${f.name} (${sizeMb} МБ)`;
+          const clearBtn = document.createElement('button');
+          clearBtn.textContent = '×';
+          clearBtn.onclick = () => {
+            fileInputEl.value = '';
+            fileChip.textContent = '';
+            fileChip.classList.add('hidden');
+          };
+          fileChip.appendChild(clearBtn);
+          fileChip.classList.remove('hidden');
+        } else if (fileChip) {
+          fileChip.textContent = '';
+          fileChip.classList.add('hidden');
+        }
+      });
+    }
     messageInput.addEventListener('keydown', (e) => {
       if (currentPeer && !currentGroup) {
         if (!isTypingSent) {
