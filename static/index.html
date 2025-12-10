@@ -277,6 +277,37 @@
       color: var(--text);
     }
     .chat-input button { background: var(--accent); color: #111; font-weight: 700; }
+    .attach-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 38px;
+      border-radius: 8px;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    #file-input { display: none; }
+    .attachment {
+      margin-top: 6px;
+    }
+    .attachment img {
+      max-width: 220px;
+      border-radius: 8px;
+      display: block;
+    }
+    .attachment video {
+      max-width: 260px;
+      border-radius: 8px;
+      display: block;
+    }
+    .attachment a {
+      color: #0f9af0;
+      word-break: break-all;
+    }
 
     .auth-overlay {
       display: none; /* отключаем оверлей, чтобы не перекрывал форму */
@@ -420,6 +451,8 @@
         <div id="chat"></div>
 
         <div class="chat-input">
+          <label for="file-input" class="attach-label" title="Прикрепить файл">📎</label>
+          <input type="file" id="file-input" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" />
           <input id="message-input" placeholder="Введите сообщение..." />
           <button id="send-btn">Отправить</button>
         </div>
@@ -560,6 +593,50 @@
       };
       document.addEventListener('touchstart', resume, true);
       document.addEventListener('click', resume, true);
+    }
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+    async function ensurePushSubscribed() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const { publicKey } = await api('/push/public_key');
+        if (!publicKey) return;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
+          });
+        }
+        await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+      } catch (e) {
+        console.warn('push subscribe failed', e);
+      }
+    }
+    async function unsubscribePush() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await api('/push/unsubscribe', {
+            method: 'POST',
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          }).catch(() => {});
+          await sub.unsubscribe();
+        }
+      } catch (e) {
+        console.warn('push unsubscribe failed', e);
+      }
     }
     function usernameById(id, groupId = null) {
       if (!id) return 'User';
@@ -896,6 +973,33 @@
       }
     }
 
+    function createAttachmentEl(m) {
+      if (!m.attachment_url) return null;
+      const wrap = document.createElement('div');
+      wrap.className = 'attachment';
+      const type = (m.attachment_type || '').toLowerCase();
+      const name = m.attachment_name || 'Вложение';
+      if (type.startsWith('image')) {
+        const img = document.createElement('img');
+        img.src = m.attachment_url;
+        img.alt = name;
+        wrap.appendChild(img);
+      } else if (type.startsWith('video')) {
+        const vid = document.createElement('video');
+        vid.src = m.attachment_url;
+        vid.controls = true;
+        wrap.appendChild(vid);
+      } else {
+        const link = document.createElement('a');
+        link.href = m.attachment_url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = name;
+        wrap.appendChild(link);
+      }
+      return wrap;
+    }
+
     function renderMessages(peerId) {
       chatEl.innerHTML = '';
       const msgs = conversations[peerId] || [];
@@ -904,9 +1008,13 @@
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
 
-        const text = document.createElement('div');
-        text.textContent = m.content;
-        wrap.appendChild(text);
+        if (m.content) {
+          const text = document.createElement('div');
+          text.textContent = m.content;
+          wrap.appendChild(text);
+        }
+        const att = createAttachmentEl(m);
+        if (att) wrap.appendChild(att);
 
         const meta = document.createElement('div');
         meta.className = 'bubble-info';
@@ -931,9 +1039,13 @@
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
 
-        const text = document.createElement('div');
-        text.textContent = m.content;
-        wrap.appendChild(text);
+        if (m.content) {
+          const text = document.createElement('div');
+          text.textContent = m.content;
+          wrap.appendChild(text);
+        }
+        const att = createAttachmentEl(m);
+        if (att) wrap.appendChild(att);
 
         const meta = document.createElement('div');
         meta.className = 'bubble-info';
@@ -1060,7 +1172,8 @@
         updateTitleBadge();
         playBeep();
         if (document.hidden) {
-          maybeNotify(usernameById(msg.sender_id), msg.content);
+          const body = msg.content || msg.attachment_name || 'Вложение';
+          maybeNotify(usernameById(msg.sender_id), body);
         }
       }
     }
@@ -1079,7 +1192,8 @@
         updateTitleBadge();
         playBeep();
         if (document.hidden) {
-          maybeNotify(usernameById(msg.sender_id, msg.group_id) + ' (группа)', msg.content);
+          const body = msg.content || msg.attachment_name || 'Вложение';
+          maybeNotify(usernameById(msg.sender_id, msg.group_id) + ' (группа)', body);
         }
       }
     }
@@ -1233,6 +1347,7 @@
         await loadUsers();
         await loadGroups();
         hideAuth();
+        ensurePushSubscribed();
       } catch (e) {
         setAuthStatus('Вход не удался: ' + e.message);
       }
@@ -1249,30 +1364,55 @@
     }
 
     async function sendMessage() {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return setChatStatus('WS не подключён');
       if (!currentPeer && !currentGroup) return setChatStatus('Выберите собеседника или группу');
+      const fileInput = document.getElementById('file-input');
+      const file = fileInput?.files?.[0];
       const content = messageInput.value.trim();
-      if (!content) return;
-      if (currentGroup) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'group_message', group_id: currentGroup, content }));
-        } else {
-          enqueueMessage({ type: 'group_message', group_id: currentGroup, content });
-          setStatus('WS не подключён, отправим при подключении');
-          connectWs();
+      let uploadMeta = null;
+      try {
+        if (file) {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch('/upload', {
+            method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            body: fd,
+          });
+          if (!res.ok) {
+            const msg = await res.text();
+            setChatStatus('Не удалось загрузить файл: ' + msg);
+            return;
+          }
+          uploadMeta = await res.json();
+          fileInput.value = '';
         }
+      } catch (e) {
+        setChatStatus('Ошибка загрузки файла: ' + e.message);
+        return;
+      }
+      if (!content && !uploadMeta) {
+        setChatStatus('Введите текст или выберите файл');
+        return;
+      }
+      const payloadBase = {
+        content,
+        attachment_url: uploadMeta?.url,
+        attachment_type: uploadMeta?.content_type,
+        attachment_name: uploadMeta?.name,
+      };
+      const wsPayload = currentGroup
+        ? { type: 'group_message', group_id: currentGroup, ...payloadBase }
+        : { receiver_id: currentPeer, ...payloadBase };
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(wsPayload));
       } else {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ receiver_id: currentPeer, content }));
-        } else {
-          enqueueMessage({ receiver_id: currentPeer, content });
-          setStatus('WS не подключён, отправим при подключении');
-          connectWs();
-        }
+        enqueueMessage(wsPayload);
+        setStatus('WS не подключён, отправим при подключении');
+        connectWs();
       }
       messageInput.value = '';
       if (isTypingSent && currentPeer) {
-        ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: false }));
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: false }));
         isTypingSent = false;
       }
     }
@@ -1358,6 +1498,7 @@
           await loadUsers();
           await loadGroups();
           hideAuth();
+          ensurePushSubscribed();
         }
       } else {
         setAuthStatus('Введите логин и пароль');
@@ -1377,6 +1518,7 @@
       if (ws) {
         try { ws.close(); } catch (e) {}
       }
+      unsubscribePush();
       ws = null;
       token = '';
       me = null;

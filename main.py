@@ -7,12 +7,24 @@
 
 import asyncio
 import hashlib
+import json
 import os
 import secrets
+import time
+import shutil
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -50,6 +62,9 @@ class Message(Base):
     sender_id = Column(Integer, nullable=False, index=True)
     receiver_id = Column(Integer, nullable=False, index=True)
     content = Column(Text, nullable=False)
+    attachment_url = Column(Text, nullable=True)
+    attachment_type = Column(String(100), nullable=True)
+    attachment_name = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     read_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
@@ -79,6 +94,9 @@ class GroupMessage(Base):
     group_id = Column(Integer, index=True, nullable=False)
     sender_id = Column(Integer, index=True, nullable=False)
     content = Column(Text, nullable=False)
+    attachment_url = Column(Text, nullable=True)
+    attachment_type = Column(String(100), nullable=True)
+    attachment_name = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -136,6 +154,9 @@ class MessageOut(BaseModel):
     sender_id: int
     receiver_id: int
     content: str
+    attachment_url: Optional[str] = None
+    attachment_type: Optional[str] = None
+    attachment_name: Optional[str] = None
     created_at: datetime
     read_at: Optional[datetime] = None
 
@@ -163,6 +184,9 @@ class GroupMessageOut(BaseModel):
     group_id: int
     sender_id: int
     content: str
+    attachment_url: Optional[str] = None
+    attachment_type: Optional[str] = None
+    attachment_name: Optional[str] = None
     created_at: datetime
     read_by: List[int] = []
 
@@ -179,6 +203,10 @@ class GroupMemberOut(BaseModel):
     user_id: int
     username: str
     joined_at: datetime | None = None
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
 
 
 # --- Безопасность ---
@@ -330,6 +358,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def on_startup() -> None:
     # Создаем таблицы при запуске (для демо)
     os.makedirs(STATIC_DIR, exist_ok=True)
+    os.makedirs(os.path.join(STATIC_DIR, "uploads"), exist_ok=True)
     Base.metadata.create_all(bind=engine)
     # Добавляем read_at в messages, если нет
     inspector = inspect(engine)
@@ -337,11 +366,30 @@ def on_startup() -> None:
     if "read_at" not in cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN read_at TIMESTAMP")
+    if "attachment_url" not in cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachment_url TEXT")
+    if "attachment_type" not in cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachment_type VARCHAR(100)")
+    if "attachment_name" not in cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachment_name VARCHAR(255)")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
     if "push_subscriptions" not in inspector.get_table_names():
         PushSubscription.__table__.create(bind=engine)
+    cols_group = [c["name"] for c in inspector.get_columns("group_messages")]
+    if "attachment_url" not in cols_group:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN attachment_url TEXT")
+    if "attachment_type" not in cols_group:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN attachment_type VARCHAR(100)")
+    if "attachment_name" not in cols_group:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN attachment_name VARCHAR(255)")
 
 
 @app.get("/", response_class=FileResponse)
@@ -360,6 +408,58 @@ def root_head():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/push/public_key")
+def push_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY or ""}
+
+
+@app.post("/push/subscribe")
+def push_subscribe(
+    payload: PushSubscriptionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not push_enabled():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Push not configured")
+    endpoint = payload.endpoint
+    p256dh = payload.keys.get("p256dh")
+    auth_key = payload.keys.get("auth")
+    if not endpoint or not p256dh or not auth_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid subscription")
+    existing = (
+        db.execute(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+        .scalar_one_or_none()
+    )
+    if existing:
+        existing.user_id = current_user.id
+        existing.p256dh = p256dh
+        existing.auth = auth_key
+    else:
+        db.add(
+            PushSubscription(
+                user_id=current_user.id,
+                endpoint=endpoint,
+                p256dh=p256dh,
+                auth=auth_key,
+            )
+        )
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/push/unsubscribe")
+def push_unsubscribe(
+    payload: PushUnsubscribeIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db.query(PushSubscription).filter(
+        PushSubscription.endpoint == payload.endpoint, PushSubscription.user_id == current_user.id
+    ).delete()
+    db.commit()
+    return {"status": "removed"}
 
 
 @app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -394,6 +494,30 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
     token = create_token(user.id)
     return TokenResponse(token=token)
+
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Загрузка вложений. Возвращает относительную ссылку для вставки в сообщение."""
+    upload_dir = os.path.join(STATIC_DIR, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = file.filename or "file"
+    ext = os.path.splitext(filename)[1]
+    safe_name = f"{int(time.time()*1000)}_{secrets.token_hex(4)}{ext}"
+    dest_path = os.path.join(upload_dir, safe_name)
+    with open(dest_path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    url = f"/static/uploads/{safe_name}"
+    return {
+        "url": url,
+        "content_type": file.content_type or "application/octet-stream",
+        "name": filename,
+        "size": os.path.getsize(dest_path),
+    }
 
 
 @app.get("/me", response_model=UserOut)
@@ -770,7 +894,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if data.get("type") == "group_message":
                 group_id = int(data.get("group_id", 0))
                 content = (data.get("content") or "").strip()
-                if not group_id or not content:
+                attachment_url = data.get("attachment_url")
+                attachment_type = data.get("attachment_type")
+                attachment_name = data.get("attachment_name")
+                if not group_id or (not content and not attachment_url):
                     await websocket.send_json({"type": "error", "message": "group_id and content required"})
                     continue
                 # Проверка участия
@@ -786,7 +913,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Not in group"})
                     continue
 
-                gmsg = GroupMessage(group_id=group_id, sender_id=user.id, content=content)
+                gmsg = GroupMessage(
+                    group_id=group_id,
+                    sender_id=user.id,
+                    content=content or "",
+                    attachment_url=attachment_url,
+                    attachment_type=attachment_type,
+                    attachment_name=attachment_name,
+                )
                 db.add(gmsg)
                 db.commit()
                 db.refresh(gmsg)
@@ -797,6 +931,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     "group_id": gmsg.group_id,
                     "sender_id": gmsg.sender_id,
                     "content": gmsg.content,
+                    "attachment_url": gmsg.attachment_url,
+                    "attachment_type": gmsg.attachment_type,
+                    "attachment_name": gmsg.attachment_name,
                     "created_at": gmsg.created_at.isoformat(),
                     "read_by": [],
                 }
@@ -812,7 +949,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await send_push_to_user(
                             uid,
                             f"Новое сообщение в группе",
-                            gmsg.content,
+                            gmsg.content or (gmsg.attachment_name or "Вложение"),
                             db,
                         )
                 continue
@@ -839,11 +976,21 @@ async def websocket_endpoint(websocket: WebSocket):
             # Обычные сообщения чата сохраняем
             receiver_id = int(data.get("receiver_id", 0))
             content = (data.get("content") or "").strip()
-            if not receiver_id or not content:
+            attachment_url = data.get("attachment_url")
+            attachment_type = data.get("attachment_type")
+            attachment_name = data.get("attachment_name")
+            if not receiver_id or (not content and not attachment_url):
                 await websocket.send_json({"type": "error", "message": "receiver_id and content required"})
                 continue
 
-            msg = Message(sender_id=user.id, receiver_id=receiver_id, content=content)
+            msg = Message(
+                sender_id=user.id,
+                receiver_id=receiver_id,
+                content=content or "",
+                attachment_url=attachment_url,
+                attachment_type=attachment_type,
+                attachment_name=attachment_name,
+            )
             db.add(msg)
             db.commit()
             db.refresh(msg)
@@ -854,6 +1001,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 "sender_id": msg.sender_id,
                 "receiver_id": msg.receiver_id,
                 "content": msg.content,
+                "attachment_url": msg.attachment_url,
+                "attachment_type": msg.attachment_type,
+                "attachment_name": msg.attachment_name,
                 "created_at": msg.created_at.isoformat(),
             }
             # Отправляем: если чат с самим собой — один раз, иначе себе и получателю
@@ -865,7 +1015,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await send_push_to_user(
                     receiver_id,
                     f"Новое сообщение от {user.username}",
-                    msg.content,
+                    msg.content or (msg.attachment_name or "Вложение"),
                     db,
                 )
     except WebSocketDisconnect:
