@@ -472,12 +472,13 @@
     const unreadUsers = new Map();   // userId -> count
     const unreadGroups = new Map();  // groupId -> count
     const typingTimers = new Map();
+    const groupTypingTimers = new Map();
     const messageQueue = [];
     let reconnectTimer = null;
     let reconnectAttempts = 0;
-    const groupTypingTimers = new Map();
     let isTypingSent = false;
     let heartbeatTimer = null;
+    const audioCtx = window.AudioContext ? new AudioContext() : null;
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -505,6 +506,43 @@
       if (landingAuthStatus) landingAuthStatus.textContent = text;
     }
     function setChatStatus(text) { chatStatus.textContent = text; }
+    function totalUnread() {
+      let sum = 0;
+      unreadUsers.forEach((v) => { sum += v; });
+      unreadGroups.forEach((v) => { sum += v; });
+      return sum;
+    }
+    function updateTitleBadge() {
+      const n = totalUnread();
+      document.title = n > 0 ? `(${n}) Messenger` : 'Simple Messenger';
+    }
+    function playBeep() {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.1, audioCtx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+    function requestNotifyPermission() {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+    function maybeNotify(title, body) {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'granted') {
+        try { new Notification(title, { body }); } catch (_) {}
+      } else if (Notification.permission === 'default') {
+        requestNotifyPermission();
+      }
+    }
     function usernameById(id, groupId = null) {
       if (!id) return 'User';
       if (me && id === me.id) return me.username || 'Вы';
@@ -1001,6 +1039,11 @@
         const prev = unreadUsers.get(peerId) || 0;
         unreadUsers.set(peerId, prev + 1);
         renderUsers(usersCache);
+        updateTitleBadge();
+        playBeep();
+        if (document.hidden) {
+          maybeNotify(usernameById(msg.sender_id), msg.content);
+        }
       }
     }
 
@@ -1015,12 +1058,19 @@
         const prev = unreadGroups.get(msg.group_id) || 0;
         unreadGroups.set(msg.group_id, prev + 1);
         renderGroups(groupsCache);
+        updateTitleBadge();
+        playBeep();
+        if (document.hidden) {
+          maybeNotify(`#${msg.group_id}`, msg.content);
+        }
       }
     }
 
     async function markGroupRead(groupId) {
       try {
         await api(`/group_messages/${groupId}/read`, { method: 'POST' });
+        unreadGroups.set(groupId, 0);
+        updateTitleBadge();
       } catch (e) {
         // ignore
       }
@@ -1046,6 +1096,8 @@
           }
         });
         renderMessages(peerId);
+        unreadUsers.set(peerId, 0);
+        updateTitleBadge();
       } catch (e) {
         // ignore
       }
