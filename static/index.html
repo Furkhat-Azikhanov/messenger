@@ -472,6 +472,9 @@
     const unreadUsers = new Map();   // userId -> count
     const unreadGroups = new Map();  // groupId -> count
     const typingTimers = new Map();
+    const messageQueue = [];
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
     const groupTypingTimers = new Map();
     let isTypingSent = false;
     let heartbeatTimer = null;
@@ -583,6 +586,28 @@
     function stopHeartbeat() {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = null;
+    }
+
+    function enqueueMessage(payload) {
+      messageQueue.push(payload);
+    }
+
+    function flushQueue() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      while (messageQueue.length) {
+        const msg = messageQueue.shift();
+        ws.send(JSON.stringify(msg));
+      }
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer || !token) return;
+      const delay = Math.min(15000, 1000 * Math.pow(2, reconnectAttempts));
+      reconnectAttempts += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWs();
+      }, delay);
     }
 
     function sendSignal(payload) {
@@ -1028,15 +1053,29 @@
 
     function connectWs() {
       if (!token) return;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
       const wsUrl = `${scheme}://${location.host}/ws?token=${encodeURIComponent(token)}`;
       ws = new WebSocket(wsUrl);
-      ws.onopen = () => setStatus('WS connected');
-      ws.onclose = () => { setStatus('WS disconnected'); ws = null; stopHeartbeat(); onlineUsers.clear(); renderUsers(usersCache); };
-      ws.onerror = () => setStatus('WS error');
+      ws.onopen = () => {
+        setStatus('WS connected');
+        reconnectAttempts = 0;
+        stopHeartbeat();
+        startHeartbeat();
+        flushQueue();
+      };
+      ws.onclose = () => {
+        setStatus('WS disconnected');
+        ws = null;
+        stopHeartbeat();
+        onlineUsers.clear();
+        renderUsers(usersCache);
+        scheduleReconnect();
+      };
+      ws.onerror = () => {
+        setStatus('WS error');
+        scheduleReconnect();
+      };
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -1049,7 +1088,6 @@
               data.online_ids.forEach((id) => onlineUsers.add(id));
               renderUsers(usersCache);
             }
-            startHeartbeat();
           }
           else if (data.type === 'user_online') { onlineUsers.add(data.user_id); renderUsers(usersCache); }
           else if (data.type === 'user_offline') { onlineUsers.delete(data.user_id); renderUsers(usersCache); }
@@ -1146,9 +1184,21 @@
       const content = messageInput.value.trim();
       if (!content) return;
       if (currentGroup) {
-        ws.send(JSON.stringify({ type: 'group_message', group_id: currentGroup, content }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'group_message', group_id: currentGroup, content }));
+        } else {
+          enqueueMessage({ type: 'group_message', group_id: currentGroup, content });
+          setStatus('WS не подключён, отправим при подключении');
+          connectWs();
+        }
       } else {
-        ws.send(JSON.stringify({ receiver_id: currentPeer, content }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ receiver_id: currentPeer, content }));
+        } else {
+          enqueueMessage({ receiver_id: currentPeer, content });
+          setStatus('WS не подключён, отправим при подключении');
+          connectWs();
+        }
       }
       messageInput.value = '';
       if (isTypingSent && currentPeer) {
