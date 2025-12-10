@@ -36,8 +36,12 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # --- База данных ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'messenger.db')}"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+DEFAULT_SQLITE = f"sqlite:///{os.path.join(BASE_DIR, 'messenger.db')}"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_SQLITE)
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 STATIC_DIR = os.path.join(BASE_DIR, "static")
