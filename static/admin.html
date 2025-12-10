@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Messenger Admin</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #0b141a; color: #e9edef; margin: 0; padding: 20px; }
+    .card { background: #111b21; border: 1px solid #1f2c33; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    input, button { padding: 8px; border-radius: 6px; border: 1px solid #2a3942; background: #111b21; color: #e9edef; }
+    button { background: #25d366; border: none; color: #0b141a; font-weight: 700; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; color: #e9edef; }
+    th, td { border: 1px solid #1f2c33; padding: 6px; font-size: 13px; }
+    th { background: #202c33; }
+    .danger { background: #b3261e; color: #fff; border: none; }
+    .small { font-size: 12px; color: #8696a0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Админ доступ</h2>
+    <label>Admin token: <input id="adm-token" style="width: 300px;" /></label>
+    <button id="btn-set-token">Установить</button>
+    <span class="small">Token берётся из переменной окружения ADMIN_TOKEN</span>
+    <div id="adm-status" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h3>Пользователи</h3>
+    <div style="display:flex; gap:8px; flex-wrap: wrap;">
+      <input id="new-username" placeholder="username" />
+      <input id="new-password" placeholder="password" type="password" />
+      <button id="btn-create-user">Создать</button>
+    </div>
+    <div style="margin-top:10px; max-height:240px; overflow:auto;">
+      <table id="users-table">
+        <thead><tr><th>ID</th><th>Username</th><th>Created</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Личные сообщения (последние 200)</h3>
+    <div style="max-height:260px; overflow:auto;">
+      <table id="msgs-table">
+        <thead><tr><th>ID</th><th>from</th><th>to</th><th>text</th><th>at</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Групповые сообщения (последние 200)</h3>
+    <div style="max-height:260px; overflow:auto;">
+      <table id="gmsgs-table">
+        <thead><tr><th>ID</th><th>group</th><th>from</th><th>text</th><th>at</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let admToken = localStorage.getItem('admin_token') || '';
+    const statusEl = document.getElementById('adm-status');
+    const headers = () => admToken ? { 'Authorization': 'Bearer ' + admToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...headers() } });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || res.statusText);
+      }
+      if (res.headers.get('content-type')?.includes('application/json')) return res.json();
+      return res.text();
+    }
+
+    async function loadUsers() {
+      const users = await api('/admin/users');
+      const tbody = document.querySelector('#users-table tbody');
+      tbody.innerHTML = '';
+      users.forEach(u => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.created_at}</td>`;
+        const td = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.textContent = 'Удалить';
+        btn.className = 'danger';
+        btn.onclick = () => deleteUser(u.id);
+        td.appendChild(btn);
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadMessages() {
+      const msgs = await api('/admin/messages');
+      const tbody = document.querySelector('#msgs-table tbody');
+      tbody.innerHTML = '';
+      msgs.forEach(m => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${m.id}</td><td>${m.sender_id}</td><td>${m.receiver_id}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
+        const td = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.textContent = 'Удалить';
+        btn.className = 'danger';
+        btn.onclick = () => deleteMessage(m.id);
+        td.appendChild(btn);
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadGroupMessages() {
+      const msgs = await api('/admin/group_messages');
+      const tbody = document.querySelector('#gmsgs-table tbody');
+      tbody.innerHTML = '';
+      msgs.forEach(m => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${m.id}</td><td>${m.group_id}</td><td>${m.sender_id}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
+        const td = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.textContent = 'Удалить';
+        btn.className = 'danger';
+        btn.onclick = () => deleteGroupMessage(m.id);
+        td.appendChild(btn);
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('Удалить пользователя и его данные?')) return;
+      await api(`/admin/users/${id}`, { method: 'DELETE' });
+      await loadUsers(); await loadMessages(); await loadGroupMessages();
+    }
+    async function deleteMessage(id) {
+      await api(`/admin/messages/${id}`, { method: 'DELETE' });
+      await loadMessages();
+    }
+    async function deleteGroupMessage(id) {
+      await api(`/admin/group_messages/${id}`, { method: 'DELETE' });
+      await loadGroupMessages();
+    }
+
+    document.getElementById('btn-set-token').onclick = () => {
+      const val = (document.getElementById('adm-token').value || '').trim();
+      admToken = val;
+      localStorage.setItem('admin_token', admToken);
+      statusEl.textContent = 'Токен сохранён';
+      init();
+    };
+
+    document.getElementById('btn-create-user').onclick = async () => {
+      const u = document.getElementById('new-username').value.trim();
+      const p = document.getElementById('new-password').value.trim();
+      if (!u || !p) return;
+      await api('/admin/users', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
+      document.getElementById('new-username').value = '';
+      document.getElementById('new-password').value = '';
+      await loadUsers();
+    };
+
+    async function init() {
+      if (!admToken) {
+        statusEl.textContent = 'Введите ADMIN_TOKEN';
+        return;
+      }
+      document.getElementById('adm-token').value = admToken;
+      try {
+        await loadUsers();
+        await loadMessages();
+        await loadGroupMessages();
+        statusEl.textContent = 'OK';
+      } catch (e) {
+        statusEl.textContent = 'Ошибка: ' + e.message;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

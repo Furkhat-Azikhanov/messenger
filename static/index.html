@@ -337,6 +337,34 @@
       color: #0f9af0;
       word-break: break-all;
     }
+    .reply-preview {
+      background: rgba(255,255,255,0.8);
+      color: #111;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-bottom: 6px;
+      border-left: 3px solid #25d366;
+    }
+    .reply-preview .author { font-weight: 700; }
+    .reply-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      padding: 6px 10px;
+      border-radius: 8px;
+      margin-right: 6px;
+    }
+    .reply-bar .title { font-size: 13px; color: var(--text); }
+    .reply-bar button {
+      background: transparent;
+      color: var(--text);
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
     .file-chip {
       display: inline-flex;
       align-items: center;
@@ -509,6 +537,10 @@
           <label for="file-input" class="attach-label" title="Прикрепить файл">📎</label>
           <input type="file" id="file-input" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" />
           <div id="file-chip" class="file-chip hidden"></div>
+          <div id="reply-bar" class="reply-bar hidden">
+            <div class="title" id="reply-title"></div>
+            <button type="button" id="reply-cancel">×</button>
+          </div>
           <input id="message-input" placeholder="Введите сообщение..." />
           <button id="mic-btn" class="mic-btn" type="button" title="Удерживайте для записи">🎤</button>
           <button id="send-btn">Отправить</button>
@@ -548,6 +580,9 @@
     const fileInputEl = document.getElementById('file-input');
     const fileChip = document.getElementById('file-chip');
     const micBtn = document.getElementById('mic-btn');
+    const replyBar = document.getElementById('reply-bar');
+    const replyTitle = document.getElementById('reply-title');
+    const replyCancel = document.getElementById('reply-cancel');
 
     let token = localStorage.getItem('token') || '';
     let me = null;
@@ -577,6 +612,7 @@
     let recorderChunks = [];
     let pendingVoiceFile = null;
     let recordStart = 0;
+    let currentReply = null; // {id, isGroup}
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -763,6 +799,24 @@
         if (m) return m.username;
       }
       return `User ${id}`;
+    }
+    function findMessageById(id, key) {
+      if (!id) return null;
+      const msgs = conversations[key] || [];
+      return msgs.find(m => m.id === id) || null;
+    }
+    function setReply(msg, isGroup = false, groupId = null) {
+      currentReply = { id: msg.id, isGroup, groupId };
+      if (replyBar && replyTitle) {
+        const author = usernameById(msg.sender_id, groupId);
+        const preview = (msg.content && msg.content.slice(0, 80)) || msg.attachment_name || 'Вложение';
+        replyTitle.textContent = `Ответ ${author}: ${preview}`;
+        replyBar.classList.remove('hidden');
+      }
+    }
+    function clearReply() {
+      currentReply = null;
+      if (replyBar) replyBar.classList.add('hidden');
     }
     function showAuth() {
       if (authBlock) authBlock.classList.remove('hidden');
@@ -1119,6 +1173,20 @@
       }
       return wrap;
     }
+    function createReplyPreview(m, key) {
+      if (!m.reply_to_id) return null;
+      const original = findMessageById(m.reply_to_id, key);
+      const wrap = document.createElement('div');
+      wrap.className = 'reply-preview';
+      if (original) {
+        const author = usernameById(original.sender_id, key?.startsWith('g:') ? parseInt((key || 'g:0').split(':')[1]) : null);
+        const text = (original.content && original.content.slice(0, 100)) || original.attachment_name || 'Вложение';
+        wrap.innerHTML = `<div class="author">${author}</div><div>${text}</div>`;
+      } else {
+        wrap.textContent = 'Ответ на сообщение';
+      }
+      return wrap;
+    }
 
     function renderMessages(peerId) {
       chatEl.innerHTML = '';
@@ -1127,7 +1195,10 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        wrap.onclick = () => setReply(m, false, null);
 
+        const replyEl = createReplyPreview(m, peerId);
+        if (replyEl) wrap.appendChild(replyEl);
         if (m.content) {
           const text = document.createElement('div');
           text.textContent = m.content;
@@ -1158,7 +1229,10 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        wrap.onclick = () => setReply(m, true, groupId);
 
+        const replyEl = createReplyPreview(m, `g:${groupId}`);
+        if (replyEl) wrap.appendChild(replyEl);
         if (m.content) {
           const text = document.createElement('div');
           text.textContent = m.content;
@@ -1237,6 +1311,7 @@
     async function openChat(user) {
       currentGroup = null;
       currentPeer = user.id;
+      clearReply();
       chatTitle.textContent = user.username;
       setChatStatus('История загружается...');
       if (groupInfo) groupInfo.classList.add('hidden');
@@ -1259,6 +1334,7 @@
     async function openGroup(group) {
       currentPeer = null;
       currentGroup = group.id;
+      clearReply();
       chatTitle.textContent = `# ${group.name}`;
       setChatStatus('История загружается...');
       unreadGroups.delete(group.id);
@@ -1519,6 +1595,7 @@
         attachment_url: uploadMeta?.url,
         attachment_type: uploadMeta?.content_type,
         attachment_name: uploadMeta?.name,
+        reply_to_id: currentReply?.id || null,
       };
       const wsPayload = currentGroup
         ? { type: 'group_message', group_id: currentGroup, ...payloadBase }
@@ -1531,6 +1608,7 @@
         connectWs();
       }
       messageInput.value = '';
+      clearReply();
       if (isTypingSent && currentPeer) {
         ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'typing', receiver_id: currentPeer, is_typing: false }));
         isTypingSent = false;
@@ -1566,6 +1644,7 @@
       }
     };
     document.getElementById('send-btn').onclick = sendMessage;
+    if (replyCancel) replyCancel.onclick = clearReply;
     if (micBtn) {
       const start = (e) => { e.preventDefault(); startVoiceRecording(); };
       const stop = (e) => { e.preventDefault(); stopVoiceRecording(); };

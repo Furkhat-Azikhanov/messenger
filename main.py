@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SQLITE = f"sqlite:///{os.path.join(BASE_DIR, 'messenger.db')}"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_SQLITE)
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
@@ -45,6 +46,7 @@ else:
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(STATIC_DIR, "uploads"))
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS = {"sub": os.getenv("VAPID_EMAIL", "mailto:example@example.com")}
@@ -69,6 +71,7 @@ class Message(Base):
     attachment_url = Column(Text, nullable=True)
     attachment_type = Column(String(100), nullable=True)
     attachment_name = Column(String(255), nullable=True)
+    reply_to_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     read_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
@@ -101,6 +104,7 @@ class GroupMessage(Base):
     attachment_url = Column(Text, nullable=True)
     attachment_type = Column(String(100), nullable=True)
     attachment_name = Column(String(255), nullable=True)
+    reply_to_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -161,6 +165,7 @@ class MessageOut(BaseModel):
     attachment_url: Optional[str] = None
     attachment_type: Optional[str] = None
     attachment_name: Optional[str] = None
+    reply_to_id: Optional[int] = None
     created_at: datetime
     read_at: Optional[datetime] = None
 
@@ -191,6 +196,7 @@ class GroupMessageOut(BaseModel):
     attachment_url: Optional[str] = None
     attachment_type: Optional[str] = None
     attachment_name: Optional[str] = None
+    reply_to_id: Optional[int] = None
     created_at: datetime
     read_by: List[int] = []
 
@@ -315,6 +321,11 @@ def get_current_user(
     return user
 
 
+def require_admin(credentials: HTTPAuthorizationCredentials = Depends(security)) -> None:
+    if not ADMIN_TOKEN or credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin token required")
+
+
 async def get_user_by_token(token: str, db: Session) -> User | None:
     user_id = active_tokens.get(token)
     if not user_id:
@@ -355,14 +366,17 @@ async def send_push_to_user(user_id: int, title: str, body: str, db: Session) ->
 
 # --- Приложение ---
 app = FastAPI(title="Simple Messenger")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Отдельный маунт для загрузок (может лежать вне static)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     # Создаем таблицы при запуске (для демо)
     os.makedirs(STATIC_DIR, exist_ok=True)
-    os.makedirs(os.path.join(STATIC_DIR, "uploads"), exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     # Добавляем read_at в messages, если нет
     inspector = inspect(engine)
@@ -379,6 +393,9 @@ def on_startup() -> None:
     if "attachment_name" not in cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN attachment_name VARCHAR(255)")
+    if "reply_to_id" not in cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN reply_to_id INTEGER")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
@@ -394,6 +411,9 @@ def on_startup() -> None:
     if "attachment_name" not in cols_group:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN attachment_name VARCHAR(255)")
+    if "reply_to_id" not in cols_group:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN reply_to_id INTEGER")
 
 
 @app.get("/", response_class=FileResponse)
@@ -412,6 +432,14 @@ def root_head():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/admin", response_class=FileResponse)
+def admin_page():
+    admin_html = os.path.join(STATIC_DIR, "admin.html")
+    if os.path.exists(admin_html):
+        return FileResponse(admin_html)
+    return {"detail": "Admin page not found"}
 
 
 @app.get("/push/public_key")
@@ -506,7 +534,7 @@ async def upload_file(
     current_user: User = Depends(get_current_user),
 ):
     """Загрузка вложений. Возвращает относительную ссылку для вставки в сообщение."""
-    upload_dir = os.path.join(STATIC_DIR, "uploads")
+    upload_dir = UPLOAD_DIR
     os.makedirs(upload_dir, exist_ok=True)
     filename = file.filename or "file"
     ext = os.path.splitext(filename)[1]
@@ -515,7 +543,8 @@ async def upload_file(
     with open(dest_path, "wb") as out:
         shutil.copyfileobj(file.file, out)
 
-    url = f"/static/uploads/{safe_name}"
+    # Отдаём через маунт /uploads, чтобы работало и при внешнем пути
+    url = f"/uploads/{safe_name}"
     return {
         "url": url,
         "content_type": file.content_type or "application/octet-stream",
@@ -533,6 +562,125 @@ def me(current_user: User = Depends(get_current_user)):
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     users = db.execute(select(User).order_by(User.id)).scalars().all()
     return users
+
+
+# --- Админ API ---
+@app.get("/admin/users", response_model=List[UserOut])
+def admin_list_users(
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return db.execute(select(User).order_by(User.id)).scalars().all()
+
+
+@app.post("/admin/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def admin_create_user(
+    payload: RegisterRequest,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    existing = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
+    user = User(username=payload.username, password_hash=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_user(
+    user_id: int,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    # Удаляем связанные сущности
+    db.query(Message).filter((Message.sender_id == user_id) | (Message.receiver_id == user_id)).delete()
+    db.query(GroupMember).filter(GroupMember.user_id == user_id).delete()
+    db.query(GroupMessageRead).filter(GroupMessageRead.user_id == user_id).delete()
+    db.query(GroupMessage).filter(GroupMessage.sender_id == user_id).delete()
+    db.query(PushSubscription).filter(PushSubscription.user_id == user_id).delete()
+    # Удаляем группы, где он владелец
+    owned_groups = db.execute(select(Group.id).where(Group.owner_id == user_id)).scalars().all()
+    for gid in owned_groups:
+        db.query(GroupMessage).filter(GroupMessage.group_id == gid).delete()
+        db.query(GroupMember).filter(GroupMember.group_id == gid).delete()
+        db.query(Group).filter(Group.id == gid).delete()
+    db.delete(user)
+    db.commit()
+    return None
+
+
+@app.get("/admin/messages", response_model=List[MessageOut])
+def admin_messages(
+    limit: int = 200,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    msgs = (
+        db.execute(select(Message).order_by(Message.id.desc()).limit(limit))
+        .scalars()
+        .all()
+    )
+    return list(msgs)
+
+
+@app.get("/admin/group_messages", response_model=List[GroupMessageOut])
+def admin_group_messages(
+    limit: int = 200,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    msgs = (
+        db.execute(select(GroupMessage).order_by(GroupMessage.id.desc()).limit(limit))
+        .scalars()
+        .all()
+    )
+    # Добавим read_by
+    ids = [m.id for m in msgs]
+    read_map = {}
+    if ids:
+        reads = db.execute(
+            select(GroupMessageRead.message_id, GroupMessageRead.user_id).where(
+                GroupMessageRead.message_id.in_(ids)
+            )
+        ).all()
+        for mid, uid in reads:
+            read_map.setdefault(mid, []).append(uid)
+    for m in msgs:
+        m.read_by = read_map.get(m.id, [])
+    return list(msgs)
+
+
+@app.delete("/admin/messages/{msg_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_message(
+    msg_id: int,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    deleted = db.query(Message).filter(Message.id == msg_id).delete()
+    db.commit()
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return None
+
+
+@app.delete("/admin/group_messages/{msg_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_group_message(
+    msg_id: int,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    db.query(GroupMessageRead).filter(GroupMessageRead.message_id == msg_id).delete()
+    deleted = db.query(GroupMessage).filter(GroupMessage.id == msg_id).delete()
+    db.commit()
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return None
 
 
 @app.get("/messages/{peer_id}", response_model=List[MessageOut])
@@ -901,6 +1049,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 attachment_url = data.get("attachment_url")
                 attachment_type = data.get("attachment_type")
                 attachment_name = data.get("attachment_name")
+                reply_to_id = data.get("reply_to_id")
                 if not group_id or (not content and not attachment_url):
                     await websocket.send_json({"type": "error", "message": "group_id and content required"})
                     continue
@@ -924,6 +1073,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     attachment_url=attachment_url,
                     attachment_type=attachment_type,
                     attachment_name=attachment_name,
+                    reply_to_id=reply_to_id,
                 )
                 db.add(gmsg)
                 db.commit()
@@ -938,6 +1088,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "attachment_url": gmsg.attachment_url,
                     "attachment_type": gmsg.attachment_type,
                     "attachment_name": gmsg.attachment_name,
+                    "reply_to_id": gmsg.reply_to_id,
                     "created_at": gmsg.created_at.isoformat(),
                     "read_by": [],
                 }
@@ -983,6 +1134,7 @@ async def websocket_endpoint(websocket: WebSocket):
             attachment_url = data.get("attachment_url")
             attachment_type = data.get("attachment_type")
             attachment_name = data.get("attachment_name")
+            reply_to_id = data.get("reply_to_id")
             if not receiver_id or (not content and not attachment_url):
                 await websocket.send_json({"type": "error", "message": "receiver_id and content required"})
                 continue
@@ -994,6 +1146,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 attachment_url=attachment_url,
                 attachment_type=attachment_type,
                 attachment_name=attachment_name,
+                reply_to_id=reply_to_id,
             )
             db.add(msg)
             db.commit()
@@ -1008,6 +1161,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "attachment_url": msg.attachment_url,
                 "attachment_type": msg.attachment_type,
                 "attachment_name": msg.attachment_name,
+                "reply_to_id": msg.reply_to_id,
                 "created_at": msg.created_at.isoformat(),
             }
             # Отправляем: если чат с самим собой — один раз, иначе себе и получателю
