@@ -329,6 +329,10 @@
       border-radius: 8px;
       display: block;
     }
+    .attachment audio {
+      width: 240px;
+      display: block;
+    }
     .attachment a {
       color: #0f9af0;
       word-break: break-all;
@@ -1095,6 +1099,11 @@
         img.src = m.attachment_url;
         img.alt = name;
         wrap.appendChild(img);
+      } else if (type.startsWith('audio') || name.toLowerCase().endsWith('.webm') || name.toLowerCase().endsWith('.mp3') || name.toLowerCase().endsWith('.m4a')) {
+        const aud = document.createElement('audio');
+        aud.controls = true;
+        aud.src = m.attachment_url;
+        wrap.appendChild(aud);
       } else if (type.startsWith('video')) {
         const vid = document.createElement('video');
         vid.src = m.attachment_url;
