@@ -1079,7 +1079,7 @@
         updateTitleBadge();
         playBeep();
         if (document.hidden) {
-          maybeNotify(`#${msg.group_id}`, msg.content);
+          maybeNotify(usernameById(msg.sender_id, msg.group_id) + ' (группа)', msg.content);
         }
       }
     }

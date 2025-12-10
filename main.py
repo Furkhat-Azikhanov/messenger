@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
 from sqlalchemy import inspect
+from pywebpush import webpush, WebPushException
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # --- База данных ---
@@ -28,6 +29,9 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY")
+VAPID_CLAIMS = {"sub": os.getenv("VAPID_EMAIL", "mailto:example@example.com")}
 
 
 class User(Base):
@@ -85,6 +89,17 @@ class GroupMessageRead(Base):
     message_id = Column(Integer, index=True, nullable=False)
     user_id = Column(Integer, index=True, nullable=False)
     read_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    endpoint = Column(Text, unique=True, nullable=False)
+    p256dh = Column(String(255), nullable=False)
+    auth = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # --- Модели запросов/ответов ---
@@ -153,6 +168,11 @@ class GroupMessageOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
 
 
 class GroupMemberOut(BaseModel):
@@ -270,6 +290,37 @@ async def get_user_by_token(token: str, db: Session) -> User | None:
     return db.get(User, user_id)
 
 
+def push_enabled() -> bool:
+    return bool(VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY)
+
+
+async def send_push_to_user(user_id: int, title: str, body: str, db: Session) -> None:
+    if not push_enabled():
+        return
+    subs = (
+        db.execute(select(PushSubscription).where(PushSubscription.user_id == user_id))
+        .scalars()
+        .all()
+    )
+    for sub in subs:
+        payload = {"title": title, "body": body}
+        try:
+            await asyncio.to_thread(
+                webpush,
+                subscription_info={
+                    "endpoint": sub.endpoint,
+                    "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
+                },
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS,
+            )
+        except WebPushException:
+            # Если пуш не доставился, удалим подписку
+            db.delete(sub)
+            db.commit()
+
+
 # --- Приложение ---
 app = FastAPI(title="Simple Messenger")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -289,6 +340,8 @@ def on_startup() -> None:
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
+    if "push_subscriptions" not in inspector.get_table_names():
+        PushSubscription.__table__.create(bind=engine)
 
 
 @app.get("/", response_class=FileResponse)
@@ -622,6 +675,12 @@ async def group_mark_read(
                 "reader_id": current_user.id,
             },
         )
+        await send_push_to_user(
+            sender_id,
+            f"Сообщение прочитано",
+            f"{current_user.username} прочитал(а) сообщение в группе",
+            db,
+        )
     return {"marked": len(to_mark)}
 
 
@@ -749,6 +808,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 for uid in member_ids:
                     await manager.send_to_user(uid, payload)
+                    if uid != user.id:
+                        await send_push_to_user(
+                            uid,
+                            f"Новое сообщение в группе",
+                            gmsg.content,
+                            db,
+                        )
                 continue
             if data.get("type") == "group_typing":
                 group_id = int(data.get("group_id", 0))
@@ -796,6 +862,12 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 await manager.send_to_user(user.id, payload)
                 await manager.send_to_user(receiver_id, payload)
+                await send_push_to_user(
+                    receiver_id,
+                    f"Новое сообщение от {user.username}",
+                    msg.content,
+                    db,
+                )
     except WebSocketDisconnect:
         manager.disconnect(user.id if "user" in locals() else 0, websocket)
         if "user" in locals():
