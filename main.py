@@ -515,17 +515,17 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     # Уведомляем всех онлайн-пользователей о новом участнике
-        await manager.broadcast(
-            {
-                "type": "user_created",
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "status": user.status,
-                    "created_at": user.created_at.isoformat(),
-                },
-            }
-        )
+    await manager.broadcast(
+        {
+            "type": "user_created",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "status": user.status,
+                "created_at": user.created_at.isoformat(),
+            },
+        }
+    )
     return user
 
 
