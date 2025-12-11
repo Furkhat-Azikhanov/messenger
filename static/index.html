@@ -454,11 +454,17 @@
     #group-member-picker label span {
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
-      gap: 8px;
+      gap: 6px;
       display: flex;
       align-items: center;
+      justify-content: flex-start;
     }
     #group-member-picker input[type="checkbox"] { margin: 0; }
+    #group-member-picker {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
 
 
   </style>
@@ -1102,10 +1108,12 @@
         const label = document.createElement('label');
         label.style.display = 'flex';
         label.style.alignItems = 'center';
-        label.style.gap = '4px';
+        label.style.gap = '6px';
         label.style.margin = '4px 0';
         label.style.color = '#ffffff';
         label.style.fontSize = '13px';
+        label.style.justifyContent = 'flex-start';
+        label.style.width = '100%';
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
