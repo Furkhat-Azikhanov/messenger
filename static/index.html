@@ -802,7 +802,8 @@
     }
     function findMessageById(id, key) {
       if (!id) return null;
-      const msgs = conversations[key] || [];
+      const keyStr = typeof key === 'string' ? key : String(key || '');
+      const msgs = conversations[keyStr] || conversations[key] || [];
       return msgs.find(m => m.id === id) || null;
     }
     function setReply(msg, isGroup = false, groupId = null) {
@@ -1175,11 +1176,14 @@
     }
     function createReplyPreview(m, key) {
       if (!m.reply_to_id) return null;
-      const original = findMessageById(m.reply_to_id, key);
+      const keyStr = typeof key === 'string' ? key : String(key || '');
+      const isGroup = keyStr.startsWith('g:');
+      const groupId = isGroup ? parseInt((keyStr.split(':')[1] || '0'), 10) || null : null;
+      const original = findMessageById(m.reply_to_id, keyStr);
       const wrap = document.createElement('div');
       wrap.className = 'reply-preview';
       if (original) {
-        const author = usernameById(original.sender_id, key?.startsWith('g:') ? parseInt((key || 'g:0').split(':')[1]) : null);
+        const author = usernameById(original.sender_id, groupId);
         const text = (original.content && original.content.slice(0, 100)) || original.attachment_name || 'Вложение';
         wrap.innerHTML = `<div class="author">${author}</div><div>${text}</div>`;
       } else {
