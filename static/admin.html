@@ -135,20 +135,16 @@
     async function deleteUser(id) {
       if (!confirm('Удалить пользователя и его данные?')) return;
       await api(`/admin/users/${id}`, { method: 'DELETE' });
-      const row = document.querySelector(`#users-table tr[data-id="${id}"]`);
-      if (row) row.remove();
-      await loadMessages(); await loadGroupMessages();
+      await loadUsers();
+      await loadMessages();
+      await loadGroupMessages();
     }
     async function deleteMessage(id) {
       await api(`/admin/messages/${id}`, { method: 'DELETE' });
-      const row = document.querySelector(`#msgs-table tr[data-id="${id}"]`);
-      if (row) row.remove();
       await loadMessages();
     }
     async function deleteGroupMessage(id) {
       await api(`/admin/group_messages/${id}`, { method: 'DELETE' });
-      const row = document.querySelector(`#gmsgs-table tr[data-id="${id}"]`);
-      if (row) row.remove();
       await loadGroupMessages();
     }
 
