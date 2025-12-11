@@ -466,6 +466,7 @@
       justify-content: center;
     }
     .bottom-nav button.active { background: #1f2c33; }
+    .status-text { margin-left: 4px; color: #8696a0; font-size: 12px; }
     .settings-panel {
       position: fixed;
       bottom: 64px;
@@ -647,6 +648,7 @@
         <button data-status="online">🟢 Онлайн</button>
         <button data-status="chat">💬 Готов поболтать</button>
         <button data-status="dnd">⛔️ Не беспокоить</button>
+        <button data-status="offline">🔴 Отключен</button>
       </div>
       <div class="settings-row" style="margin-top:10px;">
         <button id="settings-logout" class="danger">⏻ Выйти</button>
@@ -694,7 +696,8 @@
     let groupsCache = [];
     const groupMembersCache = {};
     const onlineUsers = new Set();
-    const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️' };
+    const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️', offline: '🔴' };
+    const statusLabels = { online: 'Онлайн', chat: 'Готов поболтать', dnd: 'Не беспокоить', offline: 'Отключен' };
     let pc = null;
     let localStream = null;
     let currentMedia = 'audio';
@@ -1196,6 +1199,10 @@
           icon.textContent = statusIcons[st] || '🟢';
           if (!onlineUsers.has(u.id)) icon.style.opacity = '0.5';
           btn.appendChild(icon);
+          const txt = document.createElement('span');
+          txt.className = 'status-text';
+          txt.textContent = statusLabels[st] || '';
+          btn.appendChild(txt);
           const count = unreadUsers.get(u.id) || 0;
           if (count > 0) {
             const badge = document.createElement('span');
