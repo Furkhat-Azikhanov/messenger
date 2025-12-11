@@ -356,10 +356,9 @@
       border: 1px solid #2f3b43;
       padding: 6px 10px;
       border-radius: 8px;
-      margin-right: 6px;
       flex: 1 0 100%;
-      margin-left: 52px;
-      order: 3;
+      order: 0;
+      margin: 0 0 6px 0;
     }
     .reply-bar .title { font-size: 13px; color: var(--text); }
     .reply-bar button {
@@ -620,6 +619,21 @@
     let pendingVoiceFile = null;
     let recordStart = 0;
     let currentReply = null; // {id, isGroup}
+    function attachSwipeToReply(el, msg, isGroup = false, groupId = null) {
+      let startX = 0;
+      let moved = false;
+      el.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        moved = false;
+      }, { passive: true });
+      el.addEventListener('touchmove', (e) => {
+        const dx = e.touches[0].clientX - startX;
+        if (dx > 20) moved = true;
+      }, { passive: true });
+      el.addEventListener('touchend', () => {
+        if (moved) setReply(msg, isGroup, groupId);
+      });
+    }
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -1207,6 +1221,7 @@
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
         wrap.onclick = () => setReply(m, false, null);
+        attachSwipeToReply(wrap, m, false, null);
 
         const replyEl = createReplyPreview(m, peerId);
         if (replyEl) wrap.appendChild(replyEl);
@@ -1241,6 +1256,7 @@
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
         wrap.onclick = () => setReply(m, true, groupId);
+        attachSwipeToReply(wrap, m, true, groupId);
 
         const replyEl = createReplyPreview(m, `g:${groupId}`);
         if (replyEl) wrap.appendChild(replyEl);
