@@ -44,7 +44,7 @@
     <h3>Личные сообщения (последние 200)</h3>
     <div style="max-height:260px; overflow:auto;">
       <table id="msgs-table">
-        <thead><tr><th>ID</th><th>from</th><th>to</th><th>text</th><th>at</th><th></th></tr></thead>
+        <thead><tr><th>ID</th><th>От кого</th><th>Для кого</th><th>text</th><th>at</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -65,6 +65,8 @@
     const statusEl = document.getElementById('adm-status');
     const headers = () => admToken ? { 'Authorization': 'Bearer ' + admToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 
+    const userNames = new Map();
+
     async function api(path, options = {}) {
       const res = await fetch(path, { cache: 'no-store', ...options, headers: { ...(options.headers || {}), ...headers() } });
       if (!res.ok) {
@@ -77,6 +79,8 @@
 
     async function loadUsers() {
       const users = await api('/admin/users');
+      userNames.clear();
+      users.forEach(u => userNames.set(u.id, u.username));
       const tbody = document.querySelector('#users-table tbody');
       tbody.innerHTML = '';
       users.forEach(u => {
@@ -101,7 +105,9 @@
       msgs.forEach(m => {
         const tr = document.createElement('tr');
         tr.dataset.id = m.id;
-        tr.innerHTML = `<td>${m.id}</td><td>${m.sender_id}</td><td>${m.receiver_id}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
+        const from = userNames.get(m.sender_id) || m.sender_id;
+        const to = userNames.get(m.receiver_id) || m.receiver_id;
+        tr.innerHTML = `<td>${m.id}</td><td>${from}</td><td>${to}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
         const td = document.createElement('td');
         const btn = document.createElement('button');
         btn.textContent = 'Удалить';

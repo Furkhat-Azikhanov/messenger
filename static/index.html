@@ -448,35 +448,62 @@
     }
     .mobile-only { display: none; }
     .desktop-only { display: inline-flex; }
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: #111b21;
+      border-top: 1px solid #1f2c33;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      z-index: 5;
+    }
+    .bottom-nav button {
+      background: transparent;
+      border: none;
+      color: #e9edef;
+      font-size: 22px;
+      cursor: pointer;
+    }
+    main { padding-bottom: 0; }
+    @media (max-width: 900px) {
+      main { height: calc(100vh - 54px - 56px); min-height: calc(100dvh - 54px - 56px); }
+      .chat-area { height: calc(100vh - 54px - 56px); min-height: calc(100dvh - 54px - 56px); }
+      .bottom-nav { display: flex; }
+      .desktop-only { display: none !important; }
+      .mobile-only { display: inline-flex !important; }
+    }
+    @media (min-width: 901px) {
+      .bottom-nav { display: none; }
+    }
 
     /* FIX: текст имён рядом с чекбоксом на iOS */
+    /* FIX: корректное отображение чекбокса и имени */
     #group-member-picker label {
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 0;
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
+      display: flex;
+      align-items: center;
+      gap: 1px;                 /* расстояние между чекбоксом и именем */
+      justify-content: flex-start;
     }
 
-    #group-member-picker label input[type="checkbox"] {
-      margin: 0;
-      transform: scale(1.1);
-      vertical-align: middle;
-    }
-
+    /* span НЕ должен быть flex */
     #group-member-picker label span {
-      display: inline-block;
-      line-height: 1.2;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      display: inline-block;    /* важно: чтобы не растягивался */
     }
 
-    /* Контейнер списка пользователей */
+    #group-member-picker input[type="checkbox"] { margin: 0; }
     #group-member-picker {
       display: flex;
       flex-direction: column;
+      align-items: flex-start;
     }
-
 
 
   </style>
@@ -486,8 +513,9 @@
     <header>
       <div id="status">Not connected</div>
       <div class="header-actions">
-        <button class="mobile-only hidden" id="toggle-contacts">Контакты</button>
-        <button class="hidden" id="btn-logout">Выйти</button>
+        <button class="mobile-only hidden" id="toggle-contacts" title="Контакты">👥</button>
+        <button class="hidden desktop-only" id="btn-settings-desktop" title="Настройки">⚙️</button>
+        <button class="hidden desktop-only" id="btn-logout" title="Выйти">🚪</button>
       </div>
     </header>
     <div id="auth-landing" class="auth-landing">
@@ -582,6 +610,11 @@
         <p>Чтобы начать переписку и звонки, авторизуйтесь в форме слева.</p>
       </div>
     </div>
+    <div class="bottom-nav mobile-only" id="bottom-nav">
+      <button id="nav-contacts" title="Контакты">👥</button>
+      <button id="nav-settings" title="Настройки">⚙️</button>
+      <button id="nav-logout" title="Выйти">🚪</button>
+    </div>
   </div>
 
   <script>
@@ -642,6 +675,11 @@
     let pendingVoiceFile = null;
     let recordStart = 0;
     let currentReply = null; // {id, isGroup}
+    const bottomNav = document.getElementById('bottom-nav');
+    const navContacts = document.getElementById('nav-contacts');
+    const navSettings = document.getElementById('nav-settings');
+    const navLogout = document.getElementById('nav-logout');
+    const desktopSettingsBtn = document.getElementById('btn-settings-desktop');
     function attachSwipeToReply(el, msg, isGroup = false, groupId = null) {
       let startX = 0;
       let moved = false;
@@ -1771,6 +1809,12 @@
       const show = !sidebar.classList.contains('show');
       updateSidebar(show);
     });
+    if (navContacts) navContacts.onclick = () => updateSidebar(true);
+    if (navSettings) navSettings.onclick = () => {
+      setChatStatus('Настройки скоро будут');
+    };
+    if (navLogout) navLogout.onclick = () => logout();
+    if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => setChatStatus('Настройки скоро будут');
 
     (async function init() {
       if (token) {
