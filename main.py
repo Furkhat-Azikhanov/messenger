@@ -58,7 +58,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
-    status = Column(String(20), nullable=False, server_default="online")
+    status = Column(String(20), nullable=False, server_default="offline")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -405,7 +405,7 @@ def on_startup() -> None:
     user_cols = [c["name"] for c in inspector.get_columns("users")]
     if "status" not in user_cols:
         with engine.connect() as conn:
-            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'online'")
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'offline'")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
