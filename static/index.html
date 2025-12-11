@@ -450,29 +450,33 @@
     .desktop-only { display: inline-flex; }
 
     /* FIX: текст имён рядом с чекбоксом на iOS */
-    /* FIX: корректное отображение чекбокса и имени */
     #group-member-picker label {
-      color: #ffffff !important;
-      -webkit-text-fill-color: #ffffff !important;
       display: flex;
+      flex-direction: row;
       align-items: center;
-      gap: 1px;                 /* расстояние между чекбоксом и именем */
-      justify-content: flex-start;
-    }
-
-    /* span НЕ должен быть flex */
-    #group-member-picker label span {
+      gap: 4px;
+      padding: 2px 0;
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
-      display: inline-block;    /* важно: чтобы не растягивался */
     }
 
-    #group-member-picker input[type="checkbox"] { margin: 0; }
+    #group-member-picker label input[type="checkbox"] {
+      margin: 0;
+      transform: scale(1.1);
+      vertical-align: middle;
+    }
+
+    #group-member-picker label span {
+      display: inline-block;
+      line-height: 1.2;
+    }
+
+    /* Контейнер списка пользователей */
     #group-member-picker {
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
     }
+
 
 
   </style>
