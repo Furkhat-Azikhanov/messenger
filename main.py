@@ -58,7 +58,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
-    status = Column(String(20), nullable=False, server_default="online")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -147,7 +146,6 @@ class TokenResponse(BaseModel):
 class UserOut(BaseModel):
     id: int
     username: str
-    status: Optional[str] = "online"
     created_at: datetime
 
     class Config:
@@ -219,10 +217,6 @@ class GroupMemberOut(BaseModel):
 
 class PushUnsubscribeIn(BaseModel):
     endpoint: str
-
-
-class StatusIn(BaseModel):
-    status: str
 
 
 # --- Безопасность ---
@@ -402,10 +396,6 @@ def on_startup() -> None:
     if "reply_to_id" not in cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE messages ADD COLUMN reply_to_id INTEGER")
-    user_cols = [c["name"] for c in inspector.get_columns("users")]
-    if "status" not in user_cols:
-        with engine.connect() as conn:
-            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'online'")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
@@ -521,7 +511,6 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
             "user": {
                 "id": user.id,
                 "username": user.username,
-                "status": user.status,
                 "created_at": user.created_at.isoformat(),
             },
         }
@@ -573,22 +562,6 @@ def me(current_user: User = Depends(get_current_user)):
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     users = db.execute(select(User).order_by(User.id)).scalars().all()
     return users
-
-
-@app.post("/status")
-async def set_status(
-    payload: StatusIn,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    value = (payload.status or "").strip().lower()
-    allowed = {"online", "chat", "dnd"}
-    if value not in allowed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bad status")
-    current_user.status = value
-    db.commit()
-    await manager.broadcast({"type": "status", "user_id": current_user.id, "status": value})
-    return {"status": value}
 
 
 # --- Админ API ---
