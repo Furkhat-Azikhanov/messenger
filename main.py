@@ -215,10 +215,6 @@ class StatusIn(BaseModel):
     status: str
 
 
-class UsernameIn(BaseModel):
-    username: str
-
-
 class GroupMemberOut(BaseModel):
     user_id: int
     username: str
@@ -593,24 +589,6 @@ async def set_status(
     db.commit()
     await manager.broadcast({"type": "status", "user_id": current_user.id, "status": value})
     return {"status": value}
-
-
-@app.post("/username")
-async def change_username(
-    payload: UsernameIn,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    new_name = (payload.username or "").strip()
-    if not new_name or len(new_name) < 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bad username")
-    existing = db.execute(select(User).where(User.username == new_name)).scalar_one_or_none()
-    if existing and existing.id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
-    current_user.username = new_name
-    db.commit()
-    await manager.broadcast({"type": "user_renamed", "user_id": current_user.id, "username": new_name})
-    return {"username": new_name}
 
 
 # --- Админ API ---
