@@ -467,6 +467,18 @@
       color: #e9edef;
       font-size: 22px;
       cursor: pointer;
+      flex: 1;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bottom-nav button.active {
+      background: #1f2c33;
+    }
+    .status-icon {
+      margin-left: 6px;
+      font-size: 14px;
     }
     main { padding-bottom: 0; }
     @media (max-width: 900px) {
@@ -503,6 +515,33 @@
       display: flex;
       flex-direction: column;
       align-items: flex-start;
+    }
+    .settings-panel {
+      position: fixed;
+      bottom: 64px;
+      right: 16px;
+      left: 16px;
+      background: #111b21;
+      border: 1px solid #1f2c33;
+      border-radius: 12px;
+      padding: 12px;
+      z-index: 6;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    }
+    .settings-panel h3 { margin: 0 0 8px; font-size: 15px; }
+    .settings-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .settings-row button {
+      background: #2a3942;
+      color: #e9edef;
+      border: 1px solid #2f3b43;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-weight: 600;
+    }
+    .settings-row button.danger {
+      background: #b3261e;
+      border-color: #b3261e;
+      color: #fff;
     }
 
 
@@ -611,9 +650,23 @@
       </div>
     </div>
     <div class="bottom-nav mobile-only" id="bottom-nav">
-      <button id="nav-contacts" title="Чаты">💬</button>
+      <button id="nav-contacts" title="Чаты" class="active">💬</button>
+      <button id="nav-calls" title="Звонки">📞</button>
+      <button id="nav-stories" title="Актуальное">⭐️</button>
       <button id="nav-settings" title="Настройки">⚙️</button>
       <button id="nav-logout" title="Выйти">⏻</button>
+    </div>
+    <div id="settings-panel" class="settings-panel hidden">
+      <h3>Статус</h3>
+      <div class="settings-row">
+        <button data-status="online">🟢 Онлайн</button>
+        <button data-status="chat">💬 Готов поболтать</button>
+        <button data-status="dnd">⛔️ Не беспокоить</button>
+      </div>
+      <div class="settings-row" style="margin-top:10px;">
+        <button id="settings-logout" class="danger">⏻ Выйти</button>
+        <button id="settings-close" class="secondary">Закрыть</button>
+      </div>
     </div>
   </div>
 
@@ -656,6 +709,7 @@
     let groupsCache = [];
     const groupMembersCache = {};
     const onlineUsers = new Set();
+    const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️' };
     let pc = null;
     let localStream = null;
     let currentMedia = 'audio';
@@ -677,6 +731,8 @@
     let currentReply = null; // {id, isGroup}
     const bottomNav = document.getElementById('bottom-nav');
     const navContacts = document.getElementById('nav-contacts');
+    const navCalls = document.getElementById('nav-calls');
+    const navStories = document.getElementById('nav-stories');
     const navSettings = document.getElementById('nav-settings');
     const navLogout = document.getElementById('nav-logout');
     const desktopSettingsBtn = document.getElementById('btn-settings-desktop');
@@ -900,6 +956,14 @@
     function clearReply() {
       currentReply = null;
       if (replyBar) replyBar.classList.add('hidden');
+    }
+    function showSettings() {
+      const panel = document.getElementById('settings-panel');
+      if (panel) panel.classList.remove('hidden');
+    }
+    function hideSettings() {
+      const panel = document.getElementById('settings-panel');
+      if (panel) panel.classList.add('hidden');
     }
     function showAuth() {
       if (authBlock) authBlock.classList.remove('hidden');
@@ -1132,11 +1196,13 @@
         .forEach(u => {
           const btn = document.createElement('button');
           btn.textContent = u.username;
-          if (onlineUsers.has(u.id)) {
-            const dotOnline = document.createElement('span');
-            dotOnline.className = 'online-dot';
-            btn.appendChild(dotOnline);
-          }
+          const icon = document.createElement('span');
+          icon.className = 'status-icon';
+          const isOn = onlineUsers.has(u.id);
+          const st = (u.status || 'online');
+          icon.textContent = statusIcons[st] || (isOn ? '🟢' : '⚪️');
+          if (!isOn) icon.style.opacity = '0.6';
+          btn.appendChild(icon);
           const count = unreadUsers.get(u.id) || 0;
           if (count > 0) {
             const badge = document.createElement('span');
@@ -1561,6 +1627,11 @@
           }
           else if (data.type === 'user_online') { onlineUsers.add(data.user_id); renderUsers(usersCache); }
           else if (data.type === 'user_offline') { onlineUsers.delete(data.user_id); renderUsers(usersCache); }
+          else if (data.type === 'status') {
+            const u = usersCache.find(x => x.id === data.user_id);
+            if (u) u.status = data.status;
+            renderUsers(usersCache);
+          }
           else if (data.type === 'group_created' && data.group) {
             addGroupFromPush(data.group);
           } else if (data.type === 'group_deleted' && data.group_id) {
@@ -1809,12 +1880,23 @@
       const show = !sidebar.classList.contains('show');
       updateSidebar(show);
     });
+    const statusButtons = document.querySelectorAll('#settings-panel button[data-status]');
+    statusButtons.forEach(btn => btn.onclick = () => changeStatus(btn.dataset.status));
+    const settingsClose = document.getElementById('settings-close');
+    if (settingsClose) settingsClose.onclick = hideSettings;
+    const settingsLogout = document.getElementById('settings-logout');
+    if (settingsLogout) settingsLogout.onclick = () => { hideSettings(); logout(); };
     if (navContacts) navContacts.onclick = () => updateSidebar(true);
-    if (navSettings) navSettings.onclick = () => {
-      setChatStatus('Настройки скоро будут');
-    };
+    function setActiveNav(btn) {
+      document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+    if (navContacts) navContacts.onclick = () => { updateSidebar(true); setActiveNav(navContacts); hideSettings(); setChatStatus('Контакты'); };
+    if (navCalls) navCalls.onclick = () => { setChatStatus('История звонков появится позже'); setActiveNav(navCalls); hideSettings(); };
+    if (navStories) navStories.onclick = () => { setChatStatus('Актуальное появится позже'); setActiveNav(navStories); hideSettings(); };
+    if (navSettings) navSettings.onclick = () => { setActiveNav(navSettings); showSettings(); };
     if (navLogout) navLogout.onclick = () => logout();
-    if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => setChatStatus('Настройки скоро будут');
+    if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
 
     (async function init() {
       if (token) {
@@ -1862,6 +1944,18 @@
       updateSidebar(false);
       if (groupInfo) groupInfo.classList.add('hidden');
       updateGroupMenuVisibility();
+    }
+
+    async function changeStatus(newStatus) {
+      try {
+        await api('/status', { method: 'POST', body: JSON.stringify({ status: newStatus }) });
+        if (me) me.status = newStatus;
+        setChatStatus('Статус обновлён');
+        renderUsers(usersCache);
+        hideSettings();
+      } catch (e) {
+        setChatStatus('Не удалось сменить статус: ' + e.message);
+      }
     }
   </script>
 </body>
