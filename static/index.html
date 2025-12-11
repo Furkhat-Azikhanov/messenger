@@ -1193,7 +1193,7 @@
         .forEach(u => {
           const btn = document.createElement('button');
           btn.textContent = u.username;
-          const st = u.status || 'online';
+          const st = u.status || 'offline';
           const icon = document.createElement('span');
           icon.className = 'status-icon';
           icon.textContent = statusIcons[st] || '🟢';
