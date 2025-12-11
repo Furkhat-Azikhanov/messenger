@@ -450,15 +450,23 @@
     .desktop-only { display: inline-flex; }
 
     /* FIX: текст имён рядом с чекбоксом на iOS */
-    #group-member-picker label,
+    /* FIX: корректное отображение чекбокса и имени */
+    #group-member-picker label {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      display: flex;
+      align-items: center;
+      gap: 6px;                 /* расстояние между чекбоксом и именем */
+      justify-content: flex-start;
+    }
+
+    /* span НЕ должен быть flex */
     #group-member-picker label span {
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
-      gap: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
+      display: inline-block;    /* важно: чтобы не растягивался */
     }
+
     #group-member-picker input[type="checkbox"] { margin: 0; }
     #group-member-picker {
       display: flex;
