@@ -1193,11 +1193,12 @@
         .forEach(u => {
           const btn = document.createElement('button');
           btn.textContent = u.username;
-          const st = u.status || 'offline';
+          const isOn = onlineUsers.has(u.id);
+          const st = isOn ? (u.status || 'online') : 'offline';
           const icon = document.createElement('span');
           icon.className = 'status-icon';
           icon.textContent = statusIcons[st] || '🟢';
-          if (!onlineUsers.has(u.id)) icon.style.opacity = '0.5';
+          if (!isOn) icon.style.opacity = '0.5';
           btn.appendChild(icon);
           const txt = document.createElement('span');
           txt.className = 'status-text';
