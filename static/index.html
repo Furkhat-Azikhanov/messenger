@@ -211,6 +211,7 @@
       margin-left: 6px;
       border-radius: 50%;
       background: #2ecc71;
+      animation: none;
     }
     .call-area { display: none; gap: 10px; padding: 10px 12px 6px; }
     .call-area.active { display: flex; }
@@ -453,7 +454,11 @@
     #group-member-picker label span {
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
+      gap: 8px;
+      display: flex;
+      align-items: center;
     }
+    #group-member-picker input[type="checkbox"] { margin: 0; }
 
 
   </style>
@@ -1465,7 +1470,7 @@
       const wsUrl = `${scheme}://${location.host}/ws?token=${encodeURIComponent(token)}`;
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
-        setStatus('WS connected');
+        setStatus('Online');
         reconnectAttempts = 0;
         stopHeartbeat();
         startHeartbeat();
@@ -1489,7 +1494,7 @@
           if (data.type === 'message') addIncomingMessage(data);
           else if (data.type === 'group_message') addIncomingGroupMessage(data);
           else if (data.type === 'welcome') {
-            setStatus(`WS connected as id ${data.user_id}`);
+            setStatus('Online');
             if (data.online_ids) {
               onlineUsers.clear();
               data.online_ids.forEach((id) => onlineUsers.add(id));

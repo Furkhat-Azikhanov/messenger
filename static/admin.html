@@ -66,7 +66,7 @@
     const headers = () => admToken ? { 'Authorization': 'Bearer ' + admToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 
     async function api(path, options = {}) {
-      const res = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...headers() } });
+      const res = await fetch(path, { cache: 'no-store', ...options, headers: { ...(options.headers || {}), ...headers() } });
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(txt || res.statusText);
@@ -81,6 +81,7 @@
       tbody.innerHTML = '';
       users.forEach(u => {
         const tr = document.createElement('tr');
+        tr.dataset.id = u.id;
         tr.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.created_at}</td>`;
         const td = document.createElement('td');
         const btn = document.createElement('button');
@@ -99,6 +100,7 @@
       tbody.innerHTML = '';
       msgs.forEach(m => {
         const tr = document.createElement('tr');
+        tr.dataset.id = m.id;
         tr.innerHTML = `<td>${m.id}</td><td>${m.sender_id}</td><td>${m.receiver_id}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
         const td = document.createElement('td');
         const btn = document.createElement('button');
@@ -117,6 +119,7 @@
       tbody.innerHTML = '';
       msgs.forEach(m => {
         const tr = document.createElement('tr');
+        tr.dataset.id = m.id;
         tr.innerHTML = `<td>${m.id}</td><td>${m.group_id}</td><td>${m.sender_id}</td><td>${(m.content || '').slice(0,120)}</td><td>${m.created_at}</td>`;
         const td = document.createElement('td');
         const btn = document.createElement('button');
@@ -132,14 +135,20 @@
     async function deleteUser(id) {
       if (!confirm('Удалить пользователя и его данные?')) return;
       await api(`/admin/users/${id}`, { method: 'DELETE' });
-      await loadUsers(); await loadMessages(); await loadGroupMessages();
+      const row = document.querySelector(`#users-table tr[data-id="${id}"]`);
+      if (row) row.remove();
+      await loadMessages(); await loadGroupMessages();
     }
     async function deleteMessage(id) {
       await api(`/admin/messages/${id}`, { method: 'DELETE' });
+      const row = document.querySelector(`#msgs-table tr[data-id="${id}"]`);
+      if (row) row.remove();
       await loadMessages();
     }
     async function deleteGroupMessage(id) {
       await api(`/admin/group_messages/${id}`, { method: 'DELETE' });
+      const row = document.querySelector(`#gmsgs-table tr[data-id="${id}"]`);
+      if (row) row.remove();
       await loadGroupMessages();
     }
 
