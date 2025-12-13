@@ -494,6 +494,7 @@
       border-color: #b3261e;
       color: #fff;
     }
+    .push-status { font-size: 12px; color: #8696a0; margin-top: 6px; }
     main { padding-bottom: 0; }
     @media (max-width: 900px) {
       main { height: calc(100vh - 54px - 56px); min-height: calc(100dvh - 54px - 56px); }
@@ -651,6 +652,10 @@
         <button data-status="dnd">⛔️ Не беспокоить</button>
         <button data-status="offline">🔴 Отключен</button>
       </div>
+      <div class="push-status" id="push-status">Уведомления: неизвестно</div>
+      <div class="settings-row" style="margin-top:6px;">
+        <button id="btn-request-push" class="secondary">Разрешить уведомления</button>
+      </div>
       <div class="settings-row" style="margin-top:10px;">
         <button id="settings-logout" class="danger">⏻ Выйти</button>
         <button id="settings-close" class="secondary">Закрыть</button>
@@ -711,6 +716,8 @@
     const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️', offline: '🔴' };
     const statusLabels = { online: 'Онлайн', chat: 'Готов поболтать', dnd: 'Не беспокоить', offline: 'Отключен' };
     const settingsUsernameInput = document.getElementById('settings-username');
+    const pushStatus = document.getElementById('push-status');
+    const btnRequestPush = document.getElementById('btn-request-push');
     let pc = null;
     let localStream = null;
     let currentMedia = 'audio';
@@ -773,6 +780,21 @@
       messageInput.focus({ preventScroll: true });
       messageInput.click();
       setTimeout(() => messageInput.focus({ preventScroll: true }), 80);
+    }
+    async function updatePushStatus() {
+      if (!pushStatus) return;
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        pushStatus.textContent = 'Уведомления: не поддерживаются';
+        return;
+      }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) pushStatus.textContent = 'Уведомления: разрешены';
+        else pushStatus.textContent = 'Уведомления: не разрешены';
+      } catch (_) {
+        pushStatus.textContent = 'Уведомления: неизвестно';
+      }
     }
 
     window.matchMedia('(max-width: 900px)').addEventListener('change', (e) => {
@@ -915,8 +937,10 @@
           });
         }
         await api('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+        if (pushStatus) pushStatus.textContent = 'Уведомления: разрешены';
       } catch (e) {
         console.warn('push subscribe failed', e);
+        if (pushStatus) pushStatus.textContent = 'Уведомления: не разрешены';
       }
     }
     async function unsubscribePush() {
@@ -931,6 +955,7 @@
           }).catch(() => {});
           await sub.unsubscribe();
         }
+        if (pushStatus) pushStatus.textContent = 'Уведомления: отключены';
       } catch (e) {
         console.warn('push unsubscribe failed', e);
       }
@@ -969,6 +994,7 @@
       if (settingsPanel) {
         settingsPanel.classList.remove('hidden');
         if (settingsUsernameInput && me) settingsUsernameInput.value = me.username || '';
+        updatePushStatus();
       }
     }
     function hideSettings() {
@@ -1946,6 +1972,7 @@
     if (settingsClose) settingsClose.onclick = hideSettings;
     const settingsLogout = document.getElementById('settings-logout');
     if (settingsLogout) settingsLogout.onclick = () => { hideSettings(); logout(); };
+    if (btnRequestPush) btnRequestPush.onclick = () => { requestNotifyPermission(); ensurePushSubscribed(); updatePushStatus(); };
     if (settingsUsernameInput) {
       settingsUsernameInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
