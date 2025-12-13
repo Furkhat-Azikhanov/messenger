@@ -343,6 +343,8 @@
       box-shadow: 0 8px 26px rgba(0,0,0,0.4);
       z-index: 8;
       min-width: 180px;
+      max-width: 240px;
+      width: 220px;
     }
     .msg-menu button {
       width: 100%;
@@ -1809,23 +1811,12 @@
         menu.style.display = 'none';
         return;
       }
-      // показать и позиционировать
-      menu.style.visibility = 'hidden';
+      // показать сбоку от кнопки
       menu.style.display = 'block';
-      menu.style.position = 'fixed';
-      const pad = 8;
-      const rect = anchor.getBoundingClientRect();
-      const width = menu.offsetWidth || 200;
-      const height = menu.offsetHeight || 220;
-      let left = rect.left - width + rect.width;
-      left = Math.max(pad, Math.min(left, window.innerWidth - width - pad));
-      let top = rect.bottom + 6;
-      if (top + height > window.innerHeight - pad) {
-        top = Math.max(pad, window.innerHeight - height - pad);
-      }
-      menu.style.left = `${left}px`;
-      menu.style.top = `${top}px`;
-      menu.style.visibility = 'visible';
+      menu.style.position = 'absolute';
+      menu.style.right = '0';
+      menu.style.left = 'auto';
+      menu.style.top = '28px';
     }
 
     function renderMessages(peerId) {
