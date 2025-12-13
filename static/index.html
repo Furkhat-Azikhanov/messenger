@@ -2155,9 +2155,9 @@
       if (btn) btn.classList.add('active');
     }
     if (navContacts) navContacts.onclick = () => { updateSidebar(true); hideSettings(); setActiveNav(navContacts); showChatView(); setChatStatus('Чаты'); };
-    if (navCalls) navCalls.onclick = () => { hideSettings(); setActiveNav(navCalls); showCallsView(); };
-    if (navStories) navStories.onclick = () => { hideSettings(); showChatView(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
-    if (navSettings) navSettings.onclick = () => { showChatView(); setActiveNav(navSettings); showSettings(); };
+    if (navCalls) navCalls.onclick = () => { hideSettings(); updateSidebar(false); setActiveNav(navCalls); showCallsView(); setChatStatus('История звонков'); };
+    if (navStories) navStories.onclick = () => { hideSettings(); updateSidebar(false); showChatView(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
+    if (navSettings) navSettings.onclick = () => { updateSidebar(false); showChatView(); setActiveNav(navSettings); showSettings(); };
     if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
     if (btnAcceptCall) btnAcceptCall.onclick = async () => {
       if (pendingOffer) {
