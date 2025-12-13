@@ -1811,12 +1811,24 @@
         menu.style.display = 'none';
         return;
       }
-      // показать сбоку от кнопки
+      // показать сбоку от кнопки (fixed, с учетом краёв экрана)
+      const pad = 8;
+      const rect = anchor.getBoundingClientRect();
+      const width = menu.offsetWidth || 220;
+      const height = menu.offsetHeight || 260;
+      let left = rect.right + 6;
+      if (left + width > window.innerWidth - pad) {
+        left = rect.left - width - 6;
+      }
+      left = Math.max(pad, Math.min(left, window.innerWidth - width - pad));
+      let top = rect.top;
+      if (top + height > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - height - pad);
+      }
+      menu.style.position = 'fixed';
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
       menu.style.display = 'block';
-      menu.style.position = 'absolute';
-      menu.style.right = '0';
-      menu.style.left = 'auto';
-      menu.style.top = '28px';
     }
 
     function renderMessages(peerId) {
