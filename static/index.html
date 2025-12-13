@@ -837,7 +837,11 @@
       if (!isMobile) updateSidebar(false);
     });
 
-    function setStatus(text) { statusEl.textContent = 'Online'; }
+    function setStatus(text) { statusEl.textContent = text; }
+    function showMyStatus() {
+      const s = (me && me.status) || 'offline';
+      setStatus(statusLabels[s] || 'Offline');
+    }
     function setAuthStatus(text) {
       authStatus.textContent = text;
       if (landingAuthStatus) landingAuthStatus.textContent = text;
@@ -1042,6 +1046,7 @@
         renderUsers(usersCache);
         hideSettings();
         setChatStatus('Статус обновлён');
+        showMyStatus();
       } catch (e) {
         setChatStatus('Не удалось сменить статус: ' + e.message);
       }
@@ -1705,7 +1710,7 @@
       const wsUrl = `${scheme}://${location.host}/ws?token=${encodeURIComponent(token)}`;
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
-        setStatus('Online');
+        showMyStatus();
         reconnectAttempts = 0;
         stopHeartbeat();
         startHeartbeat();
@@ -1727,7 +1732,7 @@
           if (data.type === 'message') addIncomingMessage(data);
           else if (data.type === 'group_message') addIncomingGroupMessage(data);
           else if (data.type === 'welcome') {
-            setStatus('Online');
+            showMyStatus();
             if (data.online_ids) {
               onlineUsers.clear();
               data.online_ids.forEach((id) => onlineUsers.add(id));
@@ -1739,7 +1744,9 @@
           else if (data.type === 'status') {
             const u = usersCache.find(x => x.id === data.user_id);
             if (u) u.status = data.status;
+            if (me && data.user_id === me.id) me.status = data.status;
             renderUsers(usersCache);
+            if (me && data.user_id === me.id) showMyStatus();
           }
           else if (data.type === 'group_created' && data.group) {
             addGroupFromPush(data.group);
@@ -1824,6 +1831,7 @@
         await loadGroups();
         hideAuth();
         ensurePushSubscribed();
+        showMyStatus();
       } catch (e) {
         setAuthStatus('Вход не удался: ' + e.message);
       }
@@ -1833,6 +1841,7 @@
       try {
         me = await api('/me');
         setAuthStatus(`Вошли как ${me.username} (id ${me.id})`);
+        showMyStatus();
       } catch (e) {
         setAuthStatus('Не вошли');
         showAuth();
