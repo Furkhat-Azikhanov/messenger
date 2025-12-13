@@ -1914,8 +1914,14 @@
 
     async function deleteMessageClient(msg, isGroup = false, groupId = null) {
       try {
-        const path = isGroup ? `/group_messages/${msg.id}` : `/messages/${msg.id}`;
-        await api(path, { method: 'DELETE' });
+        const pathDelete = isGroup ? `/group_messages/${msg.id}` : `/messages/${msg.id}`;
+        try {
+          await api(pathDelete, { method: 'DELETE' });
+        } catch (err) {
+          // если прокси рендер/браузер режет DELETE — используем POST fallback
+          const fallback = isGroup ? `/group_messages/${msg.id}/delete` : `/messages/${msg.id}/delete`;
+          await api(fallback, { method: 'POST' });
+        }
         const key = isGroup ? `g:${groupId}` : (msg.sender_id === me.id ? msg.receiver_id : msg.sender_id);
         const removed = removeMessageFromCache(key, msg.id);
         if (isGroup) {

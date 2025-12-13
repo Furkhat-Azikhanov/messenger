@@ -1033,6 +1033,82 @@ def admin_delete_group_message(
     return None
 
 
+@app.delete("/messages/{msg_id}")
+async def delete_message(
+    msg_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, msg_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    peer_id = msg.receiver_id if msg.sender_id == current_user.id else msg.sender_id
+    db.query(MessageReaction).filter(MessageReaction.message_id == msg_id).delete()
+    db.delete(msg)
+    db.commit()
+    payload = {"type": "message_deleted", "message_id": msg_id, "peer_id": peer_id}
+    await manager.send_to_user(current_user.id, payload)
+    if peer_id != current_user.id:
+        await manager.send_to_user(peer_id, payload)
+    return {"deleted": msg_id}
+
+
+@app.post("/messages/{msg_id}/delete")
+async def delete_message_post(
+    msg_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Запасной вариант удаления, если DELETE блокируется прокси."""
+    return await delete_message(msg_id, current_user, db)
+
+
+@app.delete("/group_messages/{msg_id}")
+async def delete_group_message(
+    msg_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, msg_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=403, detail="Not in group")
+    db.query(GroupMessageReaction).filter(GroupMessageReaction.message_id == msg_id).delete()
+    db.query(GroupMessageRead).filter(GroupMessageRead.message_id == msg_id).delete()
+    db.delete(msg)
+    db.commit()
+    payload = {"type": "group_message_deleted", "group_id": msg.group_id, "message_id": msg_id}
+    member_ids = (
+        db.execute(select(GroupMember.user_id).where(GroupMember.group_id == msg.group_id))
+        .scalars()
+        .all()
+    )
+    for uid in member_ids:
+        await manager.send_to_user(uid, payload)
+    return {"deleted": msg_id}
+
+
+@app.post("/group_messages/{msg_id}/delete")
+async def delete_group_message_post(
+    msg_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Запасной POST для удаления группового сообщения (на случай 405)."""
+    return await delete_group_message(msg_id, current_user, db)
+
+
 @app.get("/admin/export_chat")
 def admin_export_chat(
     user1: int,
