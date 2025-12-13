@@ -29,8 +29,20 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
-from sqlalchemy import desc, or_
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    Boolean,
+    create_engine,
+    func,
+    select,
+    desc,
+    or_,
+    text,
+)
 from sqlalchemy import inspect
 from pywebpush import webpush, WebPushException
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -77,6 +89,8 @@ class Message(Base):
     reply_to_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     read_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, server_default="0")
 
 
 class Group(Base):
@@ -109,6 +123,8 @@ class GroupMessage(Base):
     attachment_name = Column(String(255), nullable=True)
     reply_to_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, server_default="0")
 
 
 class GroupMessageRead(Base):
@@ -118,6 +134,24 @@ class GroupMessageRead(Base):
     message_id = Column(Integer, index=True, nullable=False)
     user_id = Column(Integer, index=True, nullable=False)
     read_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MessageEditHistory(Base):
+    __tablename__ = "message_edit_history"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    old_content = Column(Text, nullable=False)
+    edited_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GroupMessageEditHistory(Base):
+    __tablename__ = "group_message_edit_history"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    old_content = Column(Text, nullable=False)
+    edited_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class PushSubscription(Base):
@@ -139,6 +173,18 @@ class CallLog(Base):
     peer_id = Column(Integer, index=True, nullable=False)
     media = Column(String(20), nullable=False)  # audio | video
     direction = Column(String(10), nullable=False)  # out | in
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PinnedMessage(Base):
+    __tablename__ = "pinned_messages"
+
+    id = Column(Integer, primary_key=True)
+    chat_type = Column(String(10), nullable=False)  # direct | group
+    user1_id = Column(Integer, index=True, nullable=True)
+    user2_id = Column(Integer, index=True, nullable=True)
+    group_id = Column(Integer, index=True, nullable=True)
+    message_id = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -197,6 +243,8 @@ class MessageOut(BaseModel):
     reply_to_id: Optional[int] = None
     created_at: datetime
     read_at: Optional[datetime] = None
+    edited_at: Optional[datetime] = None
+    is_deleted: bool = False
 
     class Config:
         orm_mode = True
@@ -243,6 +291,8 @@ class GroupMessageOut(BaseModel):
     attachment_name: Optional[str] = None
     reply_to_id: Optional[int] = None
     created_at: datetime
+    edited_at: Optional[datetime] = None
+    is_deleted: bool = False
     read_by: List[int] = []
 
     class Config:
@@ -270,6 +320,13 @@ class GroupMemberOut(BaseModel):
 
 class PushUnsubscribeIn(BaseModel):
     endpoint: str
+
+
+class PinOut(BaseModel):
+    chat_type: str
+    peer_id: Optional[int] = None
+    group_id: Optional[int] = None
+    message: Optional[MessageOut] = None
 
 
 # --- Безопасность ---
@@ -349,6 +406,39 @@ def create_token(user_id: int) -> str:
     token = secrets.token_urlsafe(32)
     active_tokens[token] = user_id
     return token
+
+
+def serialize_message(msg: Message) -> Dict:
+    return {
+        "id": msg.id,
+        "sender_id": msg.sender_id,
+        "receiver_id": msg.receiver_id,
+        "content": msg.content,
+        "attachment_url": msg.attachment_url,
+        "attachment_type": msg.attachment_type,
+        "attachment_name": msg.attachment_name,
+        "reply_to_id": msg.reply_to_id,
+        "created_at": msg.created_at,
+        "read_at": msg.read_at,
+        "edited_at": msg.edited_at,
+        "is_deleted": msg.is_deleted or False,
+    }
+
+
+def serialize_group_message(msg: GroupMessage) -> Dict:
+    return {
+        "id": msg.id,
+        "group_id": msg.group_id,
+        "sender_id": msg.sender_id,
+        "content": msg.content,
+        "attachment_url": msg.attachment_url,
+        "attachment_type": msg.attachment_type,
+        "attachment_name": msg.attachment_name,
+        "reply_to_id": msg.reply_to_id,
+        "created_at": msg.created_at,
+        "edited_at": msg.edited_at,
+        "is_deleted": msg.is_deleted or False,
+    }
 
 
 def get_db():
@@ -442,7 +532,21 @@ def on_startup() -> None:
     # Создаем таблицы при запуске (для демо)
     os.makedirs(STATIC_DIR, exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+
+# Ensure new columns exist for legacy DBs (SQLite/Postgres)
+insp = inspect(engine)
+existing_cols_messages = {c["name"] for c in insp.get_columns("messages")}
+existing_cols_gm = {c["name"] for c in insp.get_columns("group_messages")}
+with engine.begin() as conn:
+    if "edited_at" not in existing_cols_messages:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP"))
+    if "is_deleted" not in existing_cols_messages:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+    if "edited_at" not in existing_cols_gm:
+        conn.execute(text("ALTER TABLE group_messages ADD COLUMN edited_at TIMESTAMP"))
+    if "is_deleted" not in existing_cols_gm:
+        conn.execute(text("ALTER TABLE group_messages ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
     # Добавляем read_at в messages, если нет
     inspector = inspect(engine)
     cols = [c["name"] for c in inspector.get_columns("messages")]
@@ -729,6 +833,10 @@ def list_users(current_user: User = Depends(get_current_user), db: Session = Dep
     return users
 
 
+def direct_pair_ids(a: int, b: int) -> tuple[int, int]:
+    return (a, b) if a < b else (b, a)
+
+
 @app.post("/status")
 async def set_status(
     payload: StatusIn,
@@ -992,6 +1100,61 @@ def history(
     return list(reversed(rows))
 
 
+class EditMessageIn(BaseModel):
+    content: str
+
+
+@app.post("/messages/{message_id}/edit", response_model=MessageOut)
+async def edit_message(
+    message_id: int,
+    payload: EditMessageIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    new_content = (payload.content or "").strip()
+    if not new_content:
+        raise HTTPException(status_code=400, detail="Empty content")
+    db.add(MessageEditHistory(message_id=msg.id, old_content=msg.content))
+    msg.content = new_content
+    msg.edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+    payload_ws = {"type": "message_updated", "message": serialize_message(msg)}
+    await manager.send_to_user(msg.sender_id, payload_ws)
+    await manager.send_to_user(msg.receiver_id, payload_ws)
+    return msg
+
+
+@app.post("/messages/{message_id}/delete", response_model=MessageOut)
+async def delete_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    msg.is_deleted = True
+    msg.content = ""
+    msg.attachment_url = None
+    msg.attachment_type = None
+    msg.attachment_name = None
+    msg.edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+    payload_ws = {"type": "message_deleted", "id": msg.id, "peer_id": msg.receiver_id, "from": msg.sender_id}
+    await manager.send_to_user(msg.sender_id, payload_ws)
+    await manager.send_to_user(msg.receiver_id, payload_ws)
+    return msg
+
+
 @app.post("/messages/{peer_id}/read")
 async def mark_read(
     peer_id: int,
@@ -1018,6 +1181,83 @@ async def mark_read(
         payload = {"type": "message_read", "message_ids": ids, "peer_id": current_user.id}
         await manager.send_to_user(peer_id, payload)
     return {"marked": len(ids)}
+
+
+def upsert_direct_pin(db: Session, user_a: int, user_b: int, message_id: int) -> PinnedMessage:
+    a, b = direct_pair_ids(user_a, user_b)
+    existing = (
+        db.execute(
+            select(PinnedMessage).where(
+                PinnedMessage.chat_type == "direct",
+                PinnedMessage.user1_id == a,
+                PinnedMessage.user2_id == b,
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if existing:
+        existing.message_id = message_id
+        existing.created_at = datetime.utcnow()
+        return existing
+    pin = PinnedMessage(chat_type="direct", user1_id=a, user2_id=b, message_id=message_id)
+    db.add(pin)
+    return pin
+
+
+def get_direct_pin(db: Session, user_a: int, user_b: int) -> Optional[PinnedMessage]:
+    a, b = direct_pair_ids(user_a, user_b)
+    return (
+        db.execute(
+            select(PinnedMessage).where(
+                PinnedMessage.chat_type == "direct",
+                PinnedMessage.user1_id == a,
+                PinnedMessage.user2_id == b,
+            )
+        )
+        .scalar_one_or_none()
+    )
+
+
+@app.post("/messages/{message_id}/pin", response_model=PinOut)
+async def pin_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    a, b = msg.sender_id, msg.receiver_id
+    pin = upsert_direct_pin(db, a, b, msg.id)
+    db.commit()
+    db.refresh(pin)
+    payload_ws = {
+        "type": "message_pinned",
+        "chat_type": "direct",
+        "user1": a,
+        "user2": b,
+        "message": serialize_message(msg),
+    }
+    await manager.send_to_user(a, payload_ws)
+    await manager.send_to_user(b, payload_ws)
+    return {"chat_type": "direct", "peer_id": b if current_user.id == a else a, "message": serialize_message(msg)}
+
+
+@app.get("/pinned/direct/{peer_id}", response_model=Optional[PinOut])
+def get_pinned_direct(
+    peer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    pin = get_direct_pin(db, current_user.id, peer_id)
+    if not pin:
+        return None
+    msg = db.get(Message, pin.message_id)
+    if not msg:
+        return None
+    return {"chat_type": "direct", "peer_id": peer_id, "message": serialize_message(msg)}
 
 
 @app.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
@@ -1184,6 +1424,80 @@ def group_history(
     return list(reversed(msgs))
 
 
+class EditMessageIn(BaseModel):
+    content: str
+
+
+@app.post("/group_messages/{message_id}/edit", response_model=GroupMessageOut)
+async def edit_group_message(
+    message_id: int,
+    payload: EditMessageIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Проверяем участие
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    new_content = (payload.content or "").strip()
+    if not new_content:
+        raise HTTPException(status_code=400, detail="Empty content")
+    db.add(GroupMessageEditHistory(message_id=msg.id, old_content=msg.content))
+    msg.content = new_content
+    msg.edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+    payload_ws = {"type": "group_message_updated", "message": serialize_group_message(msg)}
+    await manager.broadcast(payload_ws)
+    return msg
+
+
+@app.post("/group_messages/{message_id}/delete", response_model=GroupMessageOut)
+async def delete_group_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    msg.is_deleted = True
+    msg.content = ""
+    msg.attachment_url = None
+    msg.attachment_type = None
+    msg.attachment_name = None
+    msg.edited_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+    payload_ws = {"type": "group_message_deleted", "id": msg.id, "group_id": msg.group_id, "from": msg.sender_id}
+    await manager.broadcast(payload_ws)
+    return msg
+
+
 @app.post("/group_messages/{group_id}/read")
 async def group_mark_read(
     group_id: int,
@@ -1246,6 +1560,84 @@ async def group_mark_read(
             db,
         )
     return {"marked": len(to_mark)}
+
+
+def upsert_group_pin(db: Session, group_id: int, message_id: int) -> PinnedMessage:
+    existing = (
+        db.execute(
+            select(PinnedMessage).where(
+                PinnedMessage.chat_type == "group",
+                PinnedMessage.group_id == group_id,
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if existing:
+        existing.message_id = message_id
+        existing.created_at = datetime.utcnow()
+        return existing
+    pin = PinnedMessage(chat_type="group", group_id=group_id, message_id=message_id)
+    db.add(pin)
+    return pin
+
+
+@app.post("/group_messages/{message_id}/pin", response_model=PinOut)
+async def pin_group_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+    pin = upsert_group_pin(db, msg.group_id, msg.id)
+    db.commit()
+    db.refresh(pin)
+    payload_ws = {"type": "message_pinned", "chat_type": "group", "group_id": msg.group_id, "message": serialize_group_message(msg)}
+    await manager.broadcast(payload_ws)
+    return {"chat_type": "group", "group_id": msg.group_id, "message": serialize_group_message(msg)}
+
+
+@app.get("/pinned/group/{group_id}", response_model=Optional[PinOut])
+def get_pinned_group(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+    pin = (
+        db.execute(
+            select(PinnedMessage).where(
+                PinnedMessage.chat_type == "group", PinnedMessage.group_id == group_id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not pin:
+        return None
+    msg = db.get(GroupMessage, pin.message_id)
+    if not msg:
+        return None
+    return {"chat_type": "group", "group_id": group_id, "message": serialize_group_message(msg)}
 
 
 @app.websocket("/ws")
