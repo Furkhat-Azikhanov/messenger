@@ -840,7 +840,9 @@
     function setStatus(text) { statusEl.textContent = text; }
     function showMyStatus() {
       const s = (me && me.status) || 'offline';
-      setStatus(statusLabels[s] || 'Offline');
+      const icon = statusIcons[s] || '🔴';
+      const label = statusLabels[s] || 'Offline';
+      setStatus(`${icon} ${label}`);
     }
     function setAuthStatus(text) {
       authStatus.textContent = text;
