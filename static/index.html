@@ -418,13 +418,24 @@
       border-color: var(--accent);
       background: rgba(37,211,102,0.15);
     }
-    .reaction-add {
-      padding: 3px 8px;
-      border-radius: 12px;
-      border: 1px dashed #2f3b43;
-      background: transparent;
+    .reaction-picker {
+      position: fixed;
+      z-index: 10;
+      background: #1f2c33;
+      border: 1px solid #2a3942;
+      border-radius: 10px;
+      padding: 6px 8px;
+      display: none;
+      gap: 6px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    }
+    .reaction-picker button {
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      border-radius: 8px;
       color: #e9edef;
-      font-size: 12px;
+      font-size: 18px;
+      padding: 6px 8px;
       cursor: pointer;
     }
     .reply-bar {
@@ -778,6 +789,7 @@
       <button id="btn-decline-call" style="background:#b3261e; color:#fff;">Отклонить</button>
     </div>
   </div>
+  <div id="reaction-picker" class="reaction-picker"></div>
 
   <script>
     const statusEl = document.getElementById('status');
@@ -826,6 +838,8 @@
     const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️', offline: '🔴' };
     const statusLabels = { online: 'Онлайн', chat: 'Готов поболтать', dnd: 'Не беспокоить', offline: 'Отключен' };
     const reactionEmojis = ['👍','❤️','😂','😮','😢','🙏'];
+    const reactionPicker = document.getElementById('reaction-picker');
+    let reactionTarget = null; // {msg, isGroup, groupId}
     const settingsUsernameInput = document.getElementById('settings-username');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
@@ -967,6 +981,49 @@
         // На мобильных Safari уведомления чаще всего недоступны без push, делаем вибрацию
         if (navigator.vibrate) navigator.vibrate(150);
       }
+    }
+    function attachReactionTrigger(el, msg, isGroup = false, groupId = null) {
+      let timer = null;
+      const start = (e) => {
+        timer = setTimeout(() => {
+          const rect = el.getBoundingClientRect();
+          openReactionPicker(rect.left + rect.width / 2, rect.top, msg, isGroup, groupId);
+        }, 400);
+      };
+      const cancel = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+      el.addEventListener('touchstart', start, { passive: true });
+      el.addEventListener('touchend', cancel, { passive: true });
+      el.addEventListener('touchmove', cancel, { passive: true });
+      el.addEventListener('mousedown', start);
+      el.addEventListener('mouseleave', cancel);
+      el.addEventListener('mouseup', cancel);
+    }
+    function openReactionPicker(x, y, msg, isGroup = false, groupId = null) {
+      if (!reactionPicker) return;
+      reactionTarget = { msg, isGroup, groupId };
+      reactionPicker.innerHTML = '';
+      reactionEmojis.forEach(em => {
+        const btn = document.createElement('button');
+        btn.textContent = em;
+        btn.onclick = () => {
+          sendReaction(msg, em, isGroup, groupId);
+          closeReactionPicker();
+        };
+        reactionPicker.appendChild(btn);
+      });
+      reactionPicker.style.display = 'flex';
+      const offset = 10;
+      reactionPicker.style.left = `${x - reactionPicker.offsetWidth / 2}px`;
+      reactionPicker.style.top = `${y - reactionPicker.offsetHeight - offset}px`;
+    }
+    function closeReactionPicker() {
+      if (reactionPicker) reactionPicker.style.display = 'none';
+      reactionTarget = null;
     }
 
     function ensureAudioUnlocked() {
@@ -1600,16 +1657,6 @@
         pill.onclick = () => sendReaction(m, r.emoji, isGroup, groupId);
         wrap.appendChild(pill);
       });
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'reaction-add';
-      addBtn.textContent = '➕';
-      addBtn.onclick = () => {
-        const choice = prompt('Выбери или введи эмодзи', reactionEmojis.join(' ')) || '';
-        const emoji = choice.trim().split(/\s+/)[0] || '';
-        if (emoji) sendReaction(m, emoji, isGroup, groupId);
-      };
-      wrap.appendChild(addBtn);
       return wrap;
     }
 
@@ -1622,6 +1669,7 @@
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
         wrap.onclick = () => setReply(m, false, null);
         attachSwipeToReply(wrap, m, false, null);
+        attachReactionTrigger(wrap, m, false, null);
 
         const replyEl = createReplyPreview(m, peerId);
         if (replyEl) wrap.appendChild(replyEl);
@@ -1659,6 +1707,7 @@
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
         wrap.onclick = () => setReply(m, true, groupId);
         attachSwipeToReply(wrap, m, true, groupId);
+        attachReactionTrigger(wrap, m, true, groupId);
 
         const replyEl = createReplyPreview(m, `g:${groupId}`);
         if (replyEl) wrap.appendChild(replyEl);
