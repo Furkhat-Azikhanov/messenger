@@ -547,11 +547,11 @@
     <div id="auth-landing" class="auth-landing">
       <div class="card">
         <h2>Вход / Регистрация</h2>
-        <label>Email <input id="landing-email" /></label>
-        <label>Код из письма <input id="landing-code" placeholder="6 цифр" /></label>
+        <label>Логин <input id="landing-username" /></label>
+        <label>Пароль <input id="landing-password" type="password" /></label>
         <div class="row" style="margin-top:6px;">
-          <button class="secondary" id="landing-send-code">Отправить код</button>
-          <button id="landing-verify">Войти</button>
+          <button class="secondary" id="landing-register">Регистрация</button>
+          <button id="landing-login">Войти</button>
         </div>
         <div class="status" id="landing-auth-status"></div>
       </div>
@@ -1700,23 +1700,34 @@
       };
     }
 
-    async function sendEmailCode() {
-      const email = (document.getElementById('landing-email')?.value || '').trim();
-      if (!email) return setAuthStatus('Введите email');
+    function getAuthValues() {
+      const u1 = document.getElementById('landing-username')?.value || '';
+      const p1 = document.getElementById('landing-password')?.value || '';
+      const u2 = document.getElementById('username')?.value || '';
+      const p2 = document.getElementById('password')?.value || '';
+      return {
+        username: (u1 || u2).trim(),
+        password: (p1 || p2).trim(),
+      };
+    }
+
+    async function doRegister() {
+      const { username, password } = getAuthValues();
+      if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
-        await api('/register_email', { method: 'POST', body: JSON.stringify({ email }) });
-        setAuthStatus('Код отправлен на почту');
+        await api('/register', { method: 'POST', body: JSON.stringify({ username, password }) });
+        setAuthStatus('Готово, входим...');
+        await doLogin();
       } catch (e) {
-        setAuthStatus('Не удалось отправить код: ' + e.message);
+        setAuthStatus('Регистрация не удалась: ' + e.message);
       }
     }
 
-    async function verifyEmailLogin() {
-      const email = (document.getElementById('landing-email')?.value || '').trim();
-      const code = (document.getElementById('landing-code')?.value || '').trim();
-      if (!email || !code) return setAuthStatus('Введите email и код');
+    async function doLogin() {
+      const { username, password } = getAuthValues();
+      if (!username || !password) return setAuthStatus('Введите логин и пароль');
       try {
-        const res = await api('/verify_email', { method: 'POST', body: JSON.stringify({ email, code }) });
+        const res = await api('/login', { method: 'POST', body: JSON.stringify({ username, password }) });
         token = res.token;
         localStorage.setItem('token', token);
         await loadMe();
@@ -1796,10 +1807,14 @@
       }
     }
 
-    const landingSendCode = document.getElementById('landing-send-code');
-    const landingVerify = document.getElementById('landing-verify');
-    if (landingSendCode) landingSendCode.onclick = sendEmailCode;
-    if (landingVerify) landingVerify.onclick = verifyEmailLogin;
+    const landingRegister = document.getElementById('landing-register');
+    const landingLogin = document.getElementById('landing-login');
+    const btnRegister = document.getElementById('btn-register');
+    const btnLogin = document.getElementById('btn-login');
+    if (landingRegister) landingRegister.onclick = doRegister;
+    if (landingLogin) landingLogin.onclick = doLogin;
+    if (btnRegister) btnRegister.onclick = doRegister;
+    if (btnLogin) btnLogin.onclick = doLogin;
     if (logoutBtn) logoutBtn.onclick = logout;
     document.getElementById('btn-create-group').onclick = async () => {
       const name = document.getElementById('group-name').value.trim();
