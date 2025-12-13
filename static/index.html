@@ -367,6 +367,58 @@
       .msg-actions { display: none !important; }
     }
 
+    /* Мобильное меню долгого тапа */
+    #mobile-menu {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.25);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    #mobile-menu .panel {
+      background: rgba(17,27,33,0.96);
+      border: 1px solid #2a3942;
+      border-radius: 14px;
+      padding: 10px 0;
+      width: 260px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    }
+    #mobile-menu .reaction-row {
+      display: flex;
+      gap: 8px;
+      padding: 6px 12px 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    #mobile-menu .reaction-row button {
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      color: #e9edef;
+      border-radius: 16px;
+      padding: 6px 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #mobile-menu .action-list button {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: #e9edef;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    #mobile-menu .action-list button:hover { background: #2a3942; }
+    #mobile-menu .action-list .icon { width: 18px; text-align: center; opacity: 0.9; }
+    #mobile-menu .action-list button.disabled { opacity: 0.4; cursor: not-allowed; }
+
     .chat-input {
       background: var(--panel-2);
       border-top: 1px solid #1f2c33;
@@ -860,6 +912,16 @@
     </div>
   </div>
   <div id="reaction-picker" class="reaction-picker"></div>
+  <div id="mobile-menu">
+    <div class="panel">
+      <div class="reaction-row" id="mobile-reactions"></div>
+      <div class="action-list">
+        <button id="mm-reply"><span class="icon">↩</span><span>Ответить</span></button>
+        <button id="mm-copy"><span class="icon">📋</span><span>Копировать</span></button>
+        <button id="mm-delete"><span class="icon">🗑</span><span>Удалить</span></button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const statusEl = document.getElementById('status');
@@ -909,11 +971,17 @@
     const statusLabels = { online: 'Онлайн', chat: 'Готов поболтать', dnd: 'Не беспокоить', offline: 'Отключен' };
     const reactionEmojis = ['👍','❤️','😂','😮','😢','🙏'];
     const reactionPicker = document.getElementById('reaction-picker');
+    const mobileMenu = document.getElementById('mobile-menu');
+    const mobileReactions = document.getElementById('mobile-reactions');
+    const mmReply = document.getElementById('mm-reply');
+    const mmCopy = document.getElementById('mm-copy');
+    const mmDelete = document.getElementById('mm-delete');
+    let mobileTarget = null; // {msg,isGroup,groupId}
     let reactionTarget = null; // {msg, isGroup, groupId}
     const settingsUsernameInput = document.getElementById('settings-username');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
-    if (chatEl) chatEl.addEventListener('scroll', closeReactionPicker);
+    if (chatEl) chatEl.addEventListener('scroll', () => { closeReactionPicker(); hideMobileMenu(); });
     window.addEventListener('resize', closeReactionPicker);
     let pc = null;
     let localStream = null;
@@ -1070,17 +1138,25 @@
     }
     function attachReactionTrigger(el, msg, isGroup = false, groupId = null) {
       let timer = null;
+      let fired = false;
       const start = (e) => {
+        fired = false;
         timer = setTimeout(() => {
-          const rect = el.getBoundingClientRect();
-          openReactionPicker(rect.left + rect.width / 2, rect.top, msg, isGroup, groupId);
+          fired = true;
+          if (isMobile) {
+            showMobileMenu(msg, isGroup, groupId);
+          } else {
+            const rect = el.getBoundingClientRect();
+            openReactionPicker(rect.left + rect.width / 2, rect.top, msg, isGroup, groupId);
+          }
         }, 400);
       };
-      const cancel = () => {
+      const cancel = (e) => {
         if (timer) {
           clearTimeout(timer);
           timer = null;
         }
+        if (fired && e) e.preventDefault();
       };
       el.addEventListener('touchstart', start, { passive: true });
       el.addEventListener('touchend', cancel, { passive: true });
@@ -1091,6 +1167,7 @@
       // ПК: контекстное меню открывает реакции сразу
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        if (isMobile) return;
         const rect = el.getBoundingClientRect();
         openReactionPicker(rect.left + rect.width / 2, rect.top, msg, isGroup, groupId);
       });
@@ -1127,6 +1204,54 @@
       if (reactionPicker) reactionPicker.style.display = 'none';
       reactionTarget = null;
     }
+
+    function hideMobileMenu() {
+      if (mobileMenu) mobileMenu.style.display = 'none';
+      mobileTarget = null;
+    }
+
+    function showMobileMenu(msg, isGroup = false, groupId = null) {
+      if (!mobileMenu) return;
+      mobileTarget = { msg, isGroup, groupId };
+      if (mobileReactions) {
+        mobileReactions.innerHTML = '';
+        reactionEmojis.forEach(em => {
+          const b = document.createElement('button');
+          b.textContent = em;
+          b.onclick = () => {
+            sendReaction(msg, em, isGroup, groupId);
+            hideMobileMenu();
+          };
+          mobileReactions.appendChild(b);
+        });
+      }
+      mobileMenu.style.display = 'flex';
+    }
+    if (mobileMenu) {
+      mobileMenu.addEventListener('click', (e) => {
+        if (e.target === mobileMenu) hideMobileMenu();
+      });
+    }
+    if (mmReply) mmReply.onclick = () => {
+      if (!mobileTarget) return;
+      setReply(mobileTarget.msg, mobileTarget.isGroup, mobileTarget.groupId);
+      hideMobileMenu();
+    };
+    if (mmCopy) mmCopy.onclick = () => {
+      if (!mobileTarget) return;
+      copyMessageText(mobileTarget.msg);
+      hideMobileMenu();
+    };
+    if (mmDelete) mmDelete.onclick = () => {
+      if (!mobileTarget) return;
+      deleteMessageClient(mobileTarget.msg, mobileTarget.isGroup, mobileTarget.groupId);
+    };
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideMobileMenu();
+        closeReactionPicker();
+      }
+    });
 
     function ensureAudioUnlocked() {
       if (!audioCtx || audioUnlocked) return;
@@ -1762,6 +1887,46 @@
       return wrap;
     }
 
+    function copyMessageText(msg) {
+      const text = msg.content || msg.attachment_name || '';
+      if (!text) return;
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        document.body.removeChild(ta);
+      }
+    }
+
+    function removeMessageFromCache(key, messageId) {
+      const arr = conversations[key] || [];
+      const idx = arr.findIndex(m => m.id === messageId);
+      if (idx >= 0) {
+        arr.splice(idx, 1);
+        return true;
+      }
+      return false;
+    }
+
+    async function deleteMessageClient(msg, isGroup = false, groupId = null) {
+      try {
+        const path = isGroup ? `/group_messages/${msg.id}` : `/messages/${msg.id}`;
+        await api(path, { method: 'DELETE' });
+        const key = isGroup ? `g:${groupId}` : (msg.sender_id === me.id ? msg.receiver_id : msg.sender_id);
+        removeMessageFromCache(key, msg.id);
+        if (isGroup) renderGroupMessages(groupId);
+        else renderMessages(key);
+        hideMobileMenu();
+        setChatStatus('Сообщение удалено');
+      } catch (e) {
+        setChatStatus('Не удалось удалить сообщение: ' + e.message);
+      }
+    }
+
     function buildMsgMenu(msg, isGroup = false, groupId = null) {
       const menu = document.createElement('div');
       menu.className = 'msg-menu';
@@ -1784,11 +1949,7 @@
       };
       addItem('↩', 'Ответить', () => setReply(msg, isGroup, groupId));
       addItem('📋', 'Копировать', () => {
-        const text = msg.content || msg.attachment_name || '';
-        if (!text) return;
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(text).catch(() => {});
-        }
+        copyMessageText(msg);
       });
       addItem('😊', 'Отреагировать', () => {
         const rect = menu.getBoundingClientRect();
@@ -2261,6 +2422,19 @@
               });
             });
             if (currentPeer) renderMessages(currentPeer);
+          } else if (data.type === 'message_deleted' && data.message_id) {
+            const peerId = data.peer_id;
+            if (peerId !== undefined && peerId !== null) {
+              if (removeMessageFromCache(peerId, data.message_id) && currentPeer === peerId) {
+                renderMessages(peerId);
+              }
+            }
+          } else if (data.type === 'group_message_deleted' && data.message_id) {
+            const gid = data.group_id;
+            const key = `g:${gid}`;
+            if (removeMessageFromCache(key, data.message_id) && currentGroup === gid) {
+              renderGroupMessages(gid);
+            }
           } else if (data.type === 'reaction' && data.message_id) {
             const peerId = currentPeer || data.peer_id || null;
             const keys = Object.keys(conversations);
