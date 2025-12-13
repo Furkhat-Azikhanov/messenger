@@ -464,7 +464,11 @@
         gap: 8px;
       }
       .attach-label { border-radius: 50%; width: 42px; height: 42px; }
-      #send-btn { width: 58px; height: 42px; border-radius: 12px; }
+      #send-btn {min-height: 44px;
+  padding: 10px 20px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
     }
     .mobile-only { display: none; }
     .desktop-only { display: inline-flex; }
