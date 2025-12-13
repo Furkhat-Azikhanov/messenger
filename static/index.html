@@ -396,35 +396,6 @@
       border-left: 3px solid #25d366;
     }
     .reply-preview .author { font-weight: 700; }
-    .pinned-bar {
-      background: #1f2c33;
-      border-bottom: 1px solid #2a3942;
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .pinned-bar.hidden { display: none; }
-    .pinned-icon { font-size: 16px; }
-    .pinned-content { color: #e9edef; font-weight: 600; }
-    .msg-actions {
-      display: flex;
-      gap: 6px;
-      margin-top: 4px;
-    }
-    .msg-actions button {
-      background: #2a3942;
-      color: #e9edef;
-      border: 1px solid #2f3b43;
-      padding: 4px 6px;
-      border-radius: 6px;
-      font-size: 11px;
-      cursor: pointer;
-    }
-    .msg-deleted {
-      color: #8696a0;
-      font-style: italic;
-    }
     .reply-bar {
       display: flex;
       align-items: center;
@@ -708,13 +679,6 @@
           <div class="members-list"></div>
           <div class="close" id="group-info-close">×</div>
         </div>
-        <div id="pinned-bar" class="pinned-bar hidden">
-          <span class="pinned-icon">📌</span>
-          <div>
-            <div class="pinned-content" id="pinned-text"></div>
-            <div class="call-sub" id="pinned-meta"></div>
-          </div>
-        </div>
 
         <div class="call-area">
           <div class="video-box">
@@ -806,9 +770,6 @@
     const groupInfo = document.getElementById('group-info');
     const groupInfoClose = document.getElementById('group-info-close');
     const callArea = document.querySelector('.call-area');
-    const pinnedBar = document.getElementById('pinned-bar');
-    const pinnedText = document.getElementById('pinned-text');
-    const pinnedMeta = document.getElementById('pinned-meta');
     const callsView = document.getElementById('calls-view');
     const fileInputEl = document.getElementById('file-input');
     const fileChip = document.getElementById('file-chip');
@@ -858,8 +819,6 @@
     let pendingOffer = null;
     let callsCache = [];
     const chatInputWrap = document.querySelector('.chat-input');
-    const pinnedDirect = new Map(); // peerId -> message
-    const pinnedGroups = new Map(); // groupId -> message
     const bottomNav = document.getElementById('bottom-nav');
     const navContacts = document.getElementById('nav-contacts');
     const navCalls = document.getElementById('nav-calls');
@@ -1105,30 +1064,6 @@
       const msgs = conversations[keyStr] || conversations[key] || [];
       return msgs.find(m => m.id === id) || null;
     }
-    function messageActions(m, isGroup = false, groupId = null) {
-      if (m.is_deleted) return null;
-      const wrap = document.createElement('div');
-      wrap.className = 'msg-actions';
-      if (m.sender_id === me?.id) {
-        const editBtn = document.createElement('button');
-        editBtn.textContent = '✎';
-        editBtn.title = 'Редактировать';
-        editBtn.onclick = () => startEditMessage(m, isGroup, groupId);
-        wrap.appendChild(editBtn);
-
-        const delBtn = document.createElement('button');
-        delBtn.textContent = '🗑';
-        delBtn.title = 'Удалить';
-        delBtn.onclick = () => deleteMessageAction(m, isGroup, groupId);
-        wrap.appendChild(delBtn);
-      }
-      const pinBtn = document.createElement('button');
-      pinBtn.textContent = '📌';
-      pinBtn.title = 'Закрепить';
-      pinBtn.onclick = () => pinMessageAction(m, isGroup, groupId);
-      wrap.appendChild(pinBtn);
-      return wrap;
-    }
     function setReply(msg, isGroup = false, groupId = null) {
       currentReply = { id: msg.id, isGroup, groupId };
       if (replyBar && replyTitle) {
@@ -1141,58 +1076,6 @@
     function clearReply() {
       currentReply = null;
       if (replyBar) replyBar.classList.add('hidden');
-    }
-    async function startEditMessage(msg, isGroup = false, groupId = null) {
-      const val = prompt('Изменить сообщение', msg.content || '');
-      if (val === null) return;
-      const path = isGroup ? `/group_messages/${msg.id}/edit` : `/messages/${msg.id}/edit`;
-      try {
-        const updated = await api(path, { method: 'POST', body: JSON.stringify({ content: val }) });
-        const key = isGroup ? `g:${groupId}` : msg.sender_id === me.id ? msg.receiver_id : msg.sender_id;
-        if (conversations[key]) {
-          const arr = conversations[key];
-          const idx = arr.findIndex(m => m.id === msg.id);
-          if (idx >= 0) arr[idx] = { ...arr[idx], ...updated };
-        }
-        if (isGroup) renderGroupMessages(groupId);
-        else renderMessages(key);
-      } catch (e) {
-        setChatStatus('Не удалось отредактировать: ' + e.message);
-      }
-    }
-    async function deleteMessageAction(msg, isGroup = false, groupId = null) {
-      if (!confirm('Удалить сообщение?')) return;
-      const path = isGroup ? `/group_messages/${msg.id}/delete` : `/messages/${msg.id}/delete`;
-      try {
-        const updated = await api(path, { method: 'POST' });
-        const key = isGroup ? `g:${groupId}` : msg.sender_id === me.id ? msg.receiver_id : msg.sender_id;
-        if (conversations[key]) {
-          const arr = conversations[key];
-          const idx = arr.findIndex(m => m.id === msg.id);
-          if (idx >= 0) arr[idx] = { ...arr[idx], ...updated };
-        }
-        if (isGroup) renderGroupMessages(groupId);
-        else renderMessages(key);
-      } catch (e) {
-        setChatStatus('Не удалось удалить: ' + e.message);
-      }
-    }
-    async function pinMessageAction(msg, isGroup = false, groupId = null) {
-      const path = isGroup ? `/group_messages/${msg.id}/pin` : `/messages/${msg.id}/pin`;
-      try {
-        const res = await api(path, { method: 'POST' });
-        if (isGroup) {
-          pinnedGroups.set(groupId, msg);
-          renderPinned(msg, true);
-        } else {
-          const peerId = currentPeer === me.id ? msg.receiver_id : currentPeer || msg.sender_id;
-          pinnedDirect.set(peerId, msg);
-          renderPinned(msg, false);
-        }
-        setChatStatus('Закреплено');
-      } catch (e) {
-        setChatStatus('Не удалось закрепить: ' + e.message);
-      }
     }
     function showSettings() {
       if (settingsPanel) {
@@ -1664,12 +1547,7 @@
 
         const replyEl = createReplyPreview(m, peerId);
         if (replyEl) wrap.appendChild(replyEl);
-        if (m.is_deleted) {
-          const text = document.createElement('div');
-          text.className = 'msg-deleted';
-          text.textContent = '[Сообщение удалено]';
-          wrap.appendChild(text);
-        } else if (m.content) {
+        if (m.content) {
           const text = document.createElement('div');
           text.textContent = m.content;
           wrap.appendChild(text);
@@ -1684,11 +1562,8 @@
         if (m.sender_id === me?.id) {
           ticks = m.read_at ? ' ✓✓' : ' ✓';
         }
-        const edited = m.edited_at ? ' (изменено)' : '';
-        meta.textContent = `${usernameById(m.sender_id)} • ${date}${ticks}${edited}`;
+        meta.textContent = `${usernameById(m.sender_id)} • ${date}${ticks}`;
         wrap.appendChild(meta);
-        const acts = messageActions(m, false, null);
-        if (acts) wrap.appendChild(acts);
 
         chatEl.appendChild(wrap);
       });
@@ -1707,12 +1582,7 @@
 
         const replyEl = createReplyPreview(m, `g:${groupId}`);
         if (replyEl) wrap.appendChild(replyEl);
-        if (m.is_deleted) {
-          const text = document.createElement('div');
-          text.className = 'msg-deleted';
-          text.textContent = '[Сообщение удалено]';
-          wrap.appendChild(text);
-        } else if (m.content) {
+        if (m.content) {
           const text = document.createElement('div');
           text.textContent = m.content;
           wrap.appendChild(text);
@@ -1728,11 +1598,8 @@
           const readers = m.read_by || [];
           ticks = readers.length ? ' ✓✓' : ' ✓';
         }
-        const edited = m.edited_at ? ' (изменено)' : '';
-        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}${ticks}${edited}`;
+        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}${ticks}`;
         wrap.appendChild(meta);
-        const acts = messageActions(m, true, groupId);
-        if (acts) wrap.appendChild(acts);
 
         chatEl.appendChild(wrap);
       });
@@ -1773,20 +1640,6 @@
         card.appendChild(main);
         callsView.appendChild(card);
       });
-    }
-
-    function renderPinned(message, isGroup = false) {
-      if (!pinnedBar || !pinnedText || !pinnedMeta) return;
-      if (!message) {
-        pinnedBar.classList.add('hidden');
-        return;
-      }
-      const preview = (message.content && message.content.slice(0, 140)) || message.attachment_name || 'Вложение';
-      pinnedText.textContent = preview || '[сообщение]';
-      const author = isGroup ? usernameById(message.sender_id, message.group_id) : usernameById(message.sender_id);
-      const date = message.created_at ? new Date(message.created_at).toLocaleString() : '';
-      pinnedMeta.textContent = `${author} • ${date}`;
-      pinnedBar.classList.remove('hidden');
     }
 
     async function loadGroupMembers(groupId) {
@@ -1852,36 +1705,6 @@
       }
     }
 
-    async function loadPinnedDirect(peerId) {
-      try {
-        const pin = await api(`/pinned/direct/${peerId}`);
-        if (pin?.message) {
-          pinnedDirect.set(peerId, pin.message);
-          renderPinned(pin.message, false);
-        } else {
-          pinnedDirect.delete(peerId);
-          renderPinned(null);
-        }
-      } catch (_) {
-        // ignore
-      }
-    }
-
-    async function loadPinnedGroup(groupId) {
-      try {
-        const pin = await api(`/pinned/group/${groupId}`);
-        if (pin?.message) {
-          pinnedGroups.set(groupId, pin.message);
-          renderPinned(pin.message, true);
-        } else {
-          pinnedGroups.delete(groupId);
-          renderPinned(null);
-        }
-      } catch (_) {
-        // ignore
-      }
-    }
-
     async function openChat(user) {
       currentGroup = null;
       currentPeer = user.id;
@@ -1890,7 +1713,6 @@
       chatTitle.textContent = user.username;
       setChatStatus('История загружается...');
       if (groupInfo) groupInfo.classList.add('hidden');
-      renderPinned(pinnedDirect.get(user.id), false);
       unreadUsers.delete(user.id);
       renderUsers(usersCache);
       try {
@@ -1903,7 +1725,6 @@
         updateSidebar(false);
         updateGroupMenuVisibility();
         if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
-        loadPinnedDirect(user.id);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
@@ -1916,7 +1737,6 @@
       clearReply();
       chatTitle.textContent = `# ${group.name}`;
       setChatStatus('История загружается...');
-      renderPinned(pinnedGroups.get(group.id), true);
       unreadGroups.delete(group.id);
       renderGroups(groupsCache);
       try {
@@ -1930,7 +1750,6 @@
         if (groupInfo) groupInfo.classList.add('hidden'); // покажем участников только по клику
         await markGroupRead(group.id);
         if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
-        loadPinnedGroup(group.id);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
@@ -2057,67 +1876,6 @@
             if (me && data.user_id === me.id) me.status = data.status;
             renderUsers(usersCache);
             if (me && data.user_id === me.id) showMyStatus();
-          }
-          else if (data.type === 'message_updated' && data.message) {
-            const peerId = data.message.sender_id === me?.id ? data.message.receiver_id : data.message.sender_id;
-            const key = peerId;
-            conversations[key] = conversations[key] || [];
-            const idx = conversations[key].findIndex(m => m.id === data.message.id);
-            if (idx >= 0) conversations[key][idx] = data.message;
-            else conversations[key].push(data.message);
-            if (currentPeer === peerId) renderMessages(peerId);
-          }
-          else if (data.type === 'group_message_updated' && data.message) {
-            const gid = data.message.group_id;
-            const key = `g:${gid}`;
-            conversations[key] = conversations[key] || [];
-            const idx = conversations[key].findIndex(m => m.id === data.message.id);
-            if (idx >= 0) conversations[key][idx] = { ...conversations[key][idx], ...data.message };
-            else conversations[key].push(data.message);
-            if (currentGroup === gid) renderGroupMessages(gid);
-          }
-          else if (data.type === 'message_deleted' && data.id) {
-            const peerId = data.peer_id || data.from;
-            const key = peerId;
-            const arr = conversations[key] || [];
-            const idx = arr.findIndex(m => m.id === data.id);
-            if (idx >= 0) {
-              arr[idx].is_deleted = true;
-              arr[idx].content = '';
-              arr[idx].attachment_url = null;
-              arr[idx].attachment_type = null;
-              arr[idx].attachment_name = null;
-              arr[idx].edited_at = new Date().toISOString();
-            }
-            if (currentPeer === peerId) renderMessages(peerId);
-          }
-          else if (data.type === 'group_message_deleted' && data.id) {
-            const gid = data.group_id;
-            const key = `g:${gid}`;
-            const arr = conversations[key] || [];
-            const idx = arr.findIndex(m => m.id === data.id);
-            if (idx >= 0) {
-              arr[idx].is_deleted = true;
-              arr[idx].content = '';
-              arr[idx].attachment_url = null;
-              arr[idx].attachment_type = null;
-              arr[idx].attachment_name = null;
-              arr[idx].edited_at = new Date().toISOString();
-            }
-            if (currentGroup === gid) renderGroupMessages(gid);
-          }
-          else if (data.type === 'message_pinned' && data.message) {
-            if (data.chat_type === 'direct' && data.user1 && data.user2) {
-              const other = me && me.id === data.user1 ? data.user2 : data.user1;
-              if (other) {
-                pinnedDirect.set(other, data.message);
-                if (currentPeer === other) renderPinned(data.message, false);
-              }
-            }
-            if (data.chat_type === 'group' && data.group_id) {
-              pinnedGroups.set(data.group_id, data.message);
-              if (currentGroup === data.group_id) renderPinned(data.message, true);
-            }
           }
           else if (data.type === 'group_created' && data.group) {
             addGroupFromPush(data.group);
