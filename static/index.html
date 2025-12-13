@@ -282,6 +282,7 @@
       position: relative;
       color: #111;
       line-height: 1.3;
+      position: relative;
     }
     .me {
       margin-left: auto;
@@ -300,6 +301,50 @@
       color: #555;
       margin-top: 4px;
       text-align: right;
+    }
+    .msg-actions {
+      position: absolute;
+      top: -10px;
+      right: -8px;
+      display: flex;
+      gap: 6px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .msg:hover .msg-actions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .msg-actions button {
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fff;
+      width: 26px;
+      height: 26px;
+      border-radius: 12px;
+      font-size: 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .msg-menu {
+      position: absolute;
+      top: 28px;
+      right: 0;
+      background: rgba(17,27,33,0.95);
+      border: 1px solid #2a3942;
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: #e9edef;
+      font-size: 13px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      z-index: 4;
+    }
+    @media (max-width: 900px) {
+      .msg-actions { display: none !important; }
     }
 
     .chat-input {
@@ -1708,6 +1753,34 @@
         wrap.onclick = () => setReply(m, false, null);
         attachSwipeToReply(wrap, m, false, null);
         attachReactionTrigger(wrap, m, false, null);
+        if (!isMobile) {
+          const actions = document.createElement('div');
+          actions.className = 'msg-actions';
+          const menuBtn = document.createElement('button');
+          menuBtn.textContent = '▾';
+          const dropdown = document.createElement('div');
+          dropdown.className = 'msg-menu';
+          dropdown.textContent = 'Опции появятся позже';
+          dropdown.style.display = 'none';
+          menuBtn.onclick = (e) => {
+            e.stopPropagation();
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+          };
+          actions.appendChild(menuBtn);
+          const reactBtn = document.createElement('button');
+          reactBtn.textContent = '😊';
+          reactBtn.onclick = (e) => {
+            e.stopPropagation();
+            const rect = reactBtn.getBoundingClientRect();
+            openReactionPicker(rect.left + rect.width / 2, rect.top, m, false, null);
+          };
+          actions.appendChild(reactBtn);
+          actions.appendChild(dropdown);
+          document.addEventListener('click', (ev) => {
+            if (!actions.contains(ev.target)) dropdown.style.display = 'none';
+          });
+          wrap.appendChild(actions);
+        }
 
         const replyEl = createReplyPreview(m, peerId);
         if (replyEl) wrap.appendChild(replyEl);
@@ -1747,6 +1820,34 @@
         wrap.onclick = () => setReply(m, true, groupId);
         attachSwipeToReply(wrap, m, true, groupId);
         attachReactionTrigger(wrap, m, true, groupId);
+        if (!isMobile) {
+          const actions = document.createElement('div');
+          actions.className = 'msg-actions';
+          const menuBtn = document.createElement('button');
+          menuBtn.textContent = '▾';
+          const dropdown = document.createElement('div');
+          dropdown.className = 'msg-menu';
+          dropdown.textContent = 'Опции появятся позже';
+          dropdown.style.display = 'none';
+          menuBtn.onclick = (e) => {
+            e.stopPropagation();
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+          };
+          actions.appendChild(menuBtn);
+          const reactBtn = document.createElement('button');
+          reactBtn.textContent = '😊';
+          reactBtn.onclick = (e) => {
+            e.stopPropagation();
+            const rect = reactBtn.getBoundingClientRect();
+            openReactionPicker(rect.left + rect.width / 2, rect.top, m, true, groupId);
+          };
+          actions.appendChild(reactBtn);
+          actions.appendChild(dropdown);
+          document.addEventListener('click', (ev) => {
+            if (!actions.contains(ev.target)) dropdown.style.display = 'none';
+          });
+          wrap.appendChild(actions);
+        }
 
         const replyEl = createReplyPreview(m, `g:${groupId}`);
         if (replyEl) wrap.appendChild(replyEl);
