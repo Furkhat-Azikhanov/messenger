@@ -1964,7 +1964,13 @@
     if (navStories) navStories.onclick = () => { hideSettings(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
     if (navSettings) navSettings.onclick = () => { setActiveNav(navSettings); showSettings(); };
     if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
-    if (btnAcceptCall) btnAcceptCall.onclick = () => { if (pendingOffer) handleOffer(pendingOffer); };
+    if (btnAcceptCall) btnAcceptCall.onclick = async () => {
+      if (pendingOffer) {
+        const caller = usersCache.find(u => u.id === pendingOffer.sender_id) || { id: pendingOffer.sender_id, username: 'User ' + pendingOffer.sender_id };
+        await openChat(caller);
+        handleOffer(pendingOffer);
+      }
+    };
     if (btnDeclineCall) btnDeclineCall.onclick = () => {
       hideIncomingCall();
       if (ws && ws.readyState === WebSocket.OPEN && currentPeer) {
