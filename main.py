@@ -604,8 +604,10 @@ async def register_email(payload: RegisterEmailRequest, db: Session = Depends(ge
 
 
 def send_email_code(email: str, code: str) -> None:
+    """Отправка одноразового кода подтверждения на email через SMTP."""
     import smtplib
     from email.mime.text import MIMEText
+    from email.utils import formataddr
 
     host = os.getenv("SMTP_HOST")
     port = int(os.getenv("SMTP_PORT", "587"))
@@ -613,13 +615,19 @@ def send_email_code(email: str, code: str) -> None:
     password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_FROM", user)
 
-    msg = MIMEText(f"Ваш код для входа в Messenger: {code}")
-    msg["Subject"] = "Код подтверждения"
-    msg["From"] = sender
+    msg = MIMEText(f"Код: {code}. Действует 10 минут.")
+    msg["Subject"] = "Ваш код подтверждения"
+    # если в SMTP_FROM есть имя, приводим к корректному виду
+    if sender and " " in sender and "<" not in sender:
+        name, addr = sender.split(" ", 1)
+        sender = formataddr((name, addr))
+    msg["From"] = sender or user
     msg["To"] = email
 
-    with smtplib.SMTP(host, port) as server:
+    with smtplib.SMTP(host, port, timeout=10) as server:
+        server.ehlo()
         server.starttls()
+        server.ehlo()
         server.login(user, password)
         server.send_message(msg)
 
