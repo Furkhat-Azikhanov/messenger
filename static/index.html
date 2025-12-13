@@ -1894,7 +1894,7 @@
         await markRead(user.id);
         updateSidebar(false);
         updateGroupMenuVisibility();
-        if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
+        setTimeout(() => focusInputForKeyboard(), 50);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
@@ -1919,7 +1919,7 @@
         updateGroupMenuVisibility();
         if (groupInfo) groupInfo.classList.add('hidden'); // покажем участников только по клику
         await markGroupRead(group.id);
-        if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
+        setTimeout(() => focusInputForKeyboard(), 50);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
