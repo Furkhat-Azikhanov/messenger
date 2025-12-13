@@ -1903,7 +1903,7 @@
     }
 
     function removeMessageFromCache(key, messageId) {
-      const arr = conversations[key] || [];
+      const arr = conversations[key] || conversations[String(key)] || [];
       const idx = arr.findIndex(m => m.id === messageId);
       if (idx >= 0) {
         arr.splice(idx, 1);
@@ -1917,13 +1917,26 @@
         const path = isGroup ? `/group_messages/${msg.id}` : `/messages/${msg.id}`;
         await api(path, { method: 'DELETE' });
         const key = isGroup ? `g:${groupId}` : (msg.sender_id === me.id ? msg.receiver_id : msg.sender_id);
-        removeMessageFromCache(key, msg.id);
-        if (isGroup) renderGroupMessages(groupId);
-        else renderMessages(key);
+        const removed = removeMessageFromCache(key, msg.id);
+        if (isGroup) {
+          renderGroupMessages(groupId);
+        } else {
+          renderMessages(key);
+        }
+        if (!removed) {
+          // если локально не нашли — перезагружаем историю для точности
+          if (isGroup) {
+            openGroup({ id: groupId, name: chatTitle.textContent || '' });
+          } else {
+            const peer = usersCache.find(u => u.id === key) || { id: key, username: 'Контакт' };
+            openChat(peer);
+          }
+        }
         hideMobileMenu();
         setChatStatus('Сообщение удалено');
       } catch (e) {
         setChatStatus('Не удалось удалить сообщение: ' + e.message);
+        alert('Не удалось удалить сообщение: ' + e.message);
       }
     }
 
