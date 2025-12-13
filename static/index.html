@@ -271,6 +271,10 @@
       align-items: center;
       justify-content: center;
     }
+    .call-card.out .call-icon { color: #25d366; }
+    .call-card.in .call-icon { color: #0f9af0; }
+    .call-card.missed .call-icon { color: #ff6b6b; }
+    .call-card.missed .call-title { color: #ff6b6b; }
     .msg {
       max-width: 70%;
       padding: 10px 12px;
@@ -1614,7 +1618,7 @@
       }
       list.forEach((c) => {
         const card = document.createElement('div');
-        card.className = 'call-card';
+        card.className = `call-card ${c.direction || ''}`;
         const icon = document.createElement('div');
         icon.className = 'call-icon';
         const mediaIcon = c.media === 'video' ? '📹' : '📞';
@@ -1624,7 +1628,8 @@
         main.className = 'call-main';
         const title = document.createElement('div');
         title.className = 'call-title';
-        title.textContent = `${dirIcon} ${c.peer_name || usernameById(c.peer_id) || 'Пользователь'}`;
+        const dirLabel = c.direction === 'out' ? 'Исходящий' : (c.direction === 'in' ? 'Входящий' : 'Пропущенный');
+        title.textContent = `${dirIcon} ${dirLabel}: ${c.peer_name || usernameById(c.peer_id) || 'Пользователь'}`;
         const sub = document.createElement('div');
         sub.className = 'call-sub';
         const dt = c.created_at ? new Date(c.created_at) : new Date();
