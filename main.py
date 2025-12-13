@@ -12,6 +12,8 @@ import os
 import secrets
 import time
 import shutil
+import io
+import csv
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 
@@ -26,7 +28,7 @@ from fastapi import (
     status,
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
@@ -1028,6 +1030,63 @@ def admin_delete_group_message(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return None
+
+
+@app.get("/admin/export_chat")
+def admin_export_chat(
+    user1: int,
+    user2: int,
+    limit: int = 5000,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Выгрузка переписки двух пользователей в CSV (открывается в Excel)."""
+    if user1 == user2:
+        raise HTTPException(status_code=400, detail="Two different user ids required")
+    stmt = (
+        select(Message)
+        .where(
+            ((Message.sender_id == user1) & (Message.receiver_id == user2))
+            | ((Message.sender_id == user2) & (Message.receiver_id == user1))
+        )
+        .order_by(Message.id)
+        .limit(limit)
+    )
+    rows = db.execute(stmt).scalars().all()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "id",
+            "sender_id",
+            "receiver_id",
+            "content",
+            "attachment_url",
+            "attachment_name",
+            "created_at",
+            "read_at",
+        ]
+    )
+    for m in rows:
+        writer.writerow(
+            [
+                m.id,
+                m.sender_id,
+                m.receiver_id,
+                m.content.replace("\n", " ").strip() if m.content else "",
+                m.attachment_url or "",
+                m.attachment_name or "",
+                m.created_at.isoformat() if m.created_at else "",
+                m.read_at.isoformat() if m.read_at else "",
+            ]
+        )
+    csv_data = buf.getvalue()
+    filename = f"chat_{user1}_{user2}.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/messages/{peer_id}", response_model=List[MessageOut])
