@@ -542,11 +542,11 @@ with engine.begin() as conn:
     if "edited_at" not in existing_cols_messages:
         conn.execute(text("ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP"))
     if "is_deleted" not in existing_cols_messages:
-        conn.execute(text("ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+        conn.execute(text("ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN DEFAULT false"))
     if "edited_at" not in existing_cols_gm:
         conn.execute(text("ALTER TABLE group_messages ADD COLUMN edited_at TIMESTAMP"))
     if "is_deleted" not in existing_cols_gm:
-        conn.execute(text("ALTER TABLE group_messages ADD COLUMN is_deleted BOOLEAN DEFAULT 0"))
+        conn.execute(text("ALTER TABLE group_messages ADD COLUMN is_deleted BOOLEAN DEFAULT false"))
     # Добавляем read_at в messages, если нет
     inspector = inspect(engine)
     cols = [c["name"] for c in inspector.get_columns("messages")]
