@@ -1618,7 +1618,7 @@
         const icon = document.createElement('div');
         icon.className = 'call-icon';
         const mediaIcon = c.media === 'video' ? '📹' : '📞';
-        const dirIcon = c.direction === 'out' ? '↗' : '↙';
+        const dirIcon = c.direction === 'out' ? '↗' : (c.direction === 'in' ? '↙' : '✖');
         icon.textContent = mediaIcon;
         const main = document.createElement('div');
         main.className = 'call-main';
@@ -1907,6 +1907,7 @@
               pendingOffer = data;
               currentPeer = data.sender_id;
               const name = usernameById(data.sender_id);
+              logCall(data.media || 'audio', 'in', data.sender_id);
               showIncomingCall(data.media, name);
             }
             if (data.signal_type === 'answer') handleAnswer(data);
@@ -2164,10 +2165,12 @@
         const caller = usersCache.find(u => u.id === pendingOffer.sender_id) || { id: pendingOffer.sender_id, username: 'User ' + pendingOffer.sender_id };
         await openChat(caller);
         handleOffer(pendingOffer);
-        logCall(pendingOffer.media || 'audio', 'in', pendingOffer.sender_id);
       }
     };
     if (btnDeclineCall) btnDeclineCall.onclick = () => {
+      if (pendingOffer) {
+        logCall(pendingOffer.media || 'audio', 'missed', pendingOffer.sender_id);
+      }
       hideIncomingCall();
       if (ws && ws.readyState === WebSocket.OPEN && currentPeer) {
         ws.send(JSON.stringify({ type: 'signal', receiver_id: currentPeer, signal_type: 'end' }));

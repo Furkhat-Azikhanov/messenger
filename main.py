@@ -744,7 +744,7 @@ def log_call(
     direction = (payload.direction or "").lower()
     if media not in {"audio", "video"}:
         raise HTTPException(status_code=400, detail="Bad media")
-    if direction not in {"out", "in"}:
+    if direction not in {"out", "in", "missed"}:
         raise HTTPException(status_code=400, detail="Bad direction")
     peer = db.get(User, payload.peer_id)
     entry = CallLog(
