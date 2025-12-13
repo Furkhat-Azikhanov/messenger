@@ -201,6 +201,20 @@ class AdminResetPasswordIn(BaseModel):
     password: str
 
 
+class ReactionIn(BaseModel):
+    emoji: str
+
+
+class ReactionOut(BaseModel):
+    emoji: str
+    count: int
+    me: bool = False
+
+
+def reaction_dict_list(reactions: List[ReactionOut]) -> List[dict]:
+    return [r.dict() for r in reactions]
+
+
 class MessageIn(BaseModel):
     receiver_id: int
     content: str
@@ -265,7 +279,7 @@ class GroupMessageOut(BaseModel):
     reply_to_id: Optional[int] = None
     created_at: datetime
     read_by: List[int] = []
-    reactions: List[dict] = []
+    reactions: List[ReactionOut] = []
 
     class Config:
         orm_mode = True
@@ -292,20 +306,6 @@ class GroupMemberOut(BaseModel):
 
 class PushUnsubscribeIn(BaseModel):
     endpoint: str
-
-
-class ReactionIn(BaseModel):
-    emoji: str
-
-
-class ReactionOut(BaseModel):
-    emoji: str
-    count: int
-    me: bool = False
-
-
-def reaction_dict_list(reactions: List[ReactionOut]) -> List[dict]:
-    return [r.dict() for r in reactions]
 
 
 # --- Безопасность ---
