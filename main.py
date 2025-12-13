@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
+from sqlalchemy import desc
 from sqlalchemy import inspect
 from pywebpush import webpush, WebPushException
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -130,6 +131,17 @@ class PushSubscription(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CallLog(Base):
+    __tablename__ = "call_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    peer_id = Column(Integer, index=True, nullable=False)
+    media = Column(String(20), nullable=False)  # audio | video
+    direction = Column(String(10), nullable=False)  # out | in
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # --- Модели запросов/ответов ---
 class RegisterRequest(BaseModel):
     username: str
@@ -180,6 +192,22 @@ class MessageOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class CallLogCreate(BaseModel):
+    peer_id: int
+    media: str
+    direction: str
+
+
+class CallLogOut(BaseModel):
+    id: int
+    user_id: int
+    peer_id: int
+    peer_name: Optional[str] = None
+    media: str
+    direction: str
+    created_at: datetime
 
 
 class GroupCreate(BaseModel):
@@ -704,6 +732,76 @@ async def set_status(
     db.commit()
     await manager.broadcast({"type": "status", "user_id": current_user.id, "status": value})
     return {"status": value}
+
+
+@app.post("/calls", response_model=CallLogOut)
+def log_call(
+    payload: CallLogCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    media = (payload.media or "").lower()
+    direction = (payload.direction or "").lower()
+    if media not in {"audio", "video"}:
+        raise HTTPException(status_code=400, detail="Bad media")
+    if direction not in {"out", "in"}:
+        raise HTTPException(status_code=400, detail="Bad direction")
+    peer = db.get(User, payload.peer_id)
+    entry = CallLog(
+        user_id=current_user.id,
+        peer_id=payload.peer_id,
+        media=media,
+        direction=direction,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return CallLogOut(
+        id=entry.id,
+        user_id=entry.user_id,
+        peer_id=entry.peer_id,
+        peer_name=peer.username if peer else None,
+        media=entry.media,
+        direction=entry.direction,
+        created_at=entry.created_at,
+    )
+
+
+@app.get("/calls", response_model=List[CallLogOut])
+def list_calls(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.execute(
+            select(CallLog)
+            .where(CallLog.user_id == current_user.id)
+            .order_by(desc(CallLog.created_at))
+            .limit(200)
+        )
+        .scalars()
+        .all()
+    )
+    peer_ids = {row.peer_id for row in rows}
+    peers = (
+        db.execute(select(User.id, User.username).where(User.id.in_(peer_ids)))
+        .all()
+        if peer_ids
+        else []
+    )
+    peer_map = {pid: uname for pid, uname in peers}
+    return [
+        CallLogOut(
+            id=row.id,
+            user_id=row.user_id,
+            peer_id=row.peer_id,
+            peer_name=peer_map.get(row.peer_id),
+            media=row.media,
+            direction=row.direction,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 @app.post("/username")

@@ -234,6 +234,43 @@
       border-radius: 6px;
       font-size: 12px;
     }
+    .calls-view {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: linear-gradient(180deg, #0d141a 0%, #0f1b22 100%);
+    }
+    .call-card {
+      background: #152029;
+      border: 1px solid #1f2c33;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.25);
+    }
+    .call-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .call-title { font-weight: 700; color: #e9edef; }
+    .call-sub { color: #8696a0; font-size: 12px; }
+    .call-icon {
+      font-size: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #1f2c33;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
     .msg {
       max-width: 70%;
       padding: 10px 12px;
@@ -650,6 +687,8 @@
           </div>
         </div>
 
+        <div id="calls-view" class="calls-view hidden"></div>
+
         <div id="chat"></div>
 
         <div class="chat-input">
@@ -727,6 +766,7 @@
     const groupInfo = document.getElementById('group-info');
     const groupInfoClose = document.getElementById('group-info-close');
     const callArea = document.querySelector('.call-area');
+    const callsView = document.getElementById('calls-view');
     const fileInputEl = document.getElementById('file-input');
     const fileChip = document.getElementById('file-chip');
     const micBtn = document.getElementById('mic-btn');
@@ -773,6 +813,8 @@
     let recordStart = 0;
     let currentReply = null; // {id, isGroup}
     let pendingOffer = null;
+    let callsCache = [];
+    const chatInputWrap = document.querySelector('.chat-input');
     const bottomNav = document.getElementById('bottom-nav');
     const navContacts = document.getElementById('nav-contacts');
     const navCalls = document.getElementById('nav-calls');
@@ -1100,6 +1142,21 @@
       groupMenuBtn.classList.add('hidden');
     }
 
+    function showCallsView() {
+      if (callsView) callsView.classList.remove('hidden');
+      if (chatEl) chatEl.classList.add('hidden');
+      if (chatInputWrap) chatInputWrap.classList.add('hidden');
+      if (groupInfo) groupInfo.classList.add('hidden');
+      setChatStatus('История звонков');
+      loadCalls();
+    }
+
+    function showChatView() {
+      if (callsView) callsView.classList.add('hidden');
+      if (chatEl) chatEl.classList.remove('hidden');
+      if (chatInputWrap) chatInputWrap.classList.remove('hidden');
+    }
+
     function clearVideos() {
       if (remoteVideo) remoteVideo.srcObject = null;
       if (localVideo) localVideo.srcObject = null;
@@ -1175,6 +1232,21 @@
       ws.send(JSON.stringify({ type: 'signal', receiver_id: currentPeer, ...payload }));
     }
 
+    async function logCall(media, direction, peerId) {
+      if (!peerId) return;
+      try {
+        await api('/calls', {
+          method: 'POST',
+          body: JSON.stringify({ media, direction, peer_id: peerId }),
+        });
+        if (callsView && !callsView.classList.contains('hidden')) {
+          loadCalls();
+        }
+      } catch (e) {
+        console.warn('call log failed', e);
+      }
+    }
+
     async function ensureLocalStream(media) {
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
@@ -1215,6 +1287,7 @@
         await pc.setLocalDescription(offer);
         sendSignal({ signal_type: 'offer', sdp: offer, media });
         setChatStatus(media === 'video' ? 'Видео вызов...' : 'Аудио вызов...');
+        logCall(media, 'out', currentPeer);
         if (callArea) callArea.classList.add('active');
       } catch (e) {
         setChatStatus('Не удалось начать звонок: ' + e.message);
@@ -1529,6 +1602,41 @@
       chatEl.scrollTop = chatEl.scrollHeight;
     }
 
+    function renderCalls(list) {
+      if (!callsView) return;
+      callsView.innerHTML = '';
+      if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'status';
+        empty.textContent = 'Пока нет звонков';
+        callsView.appendChild(empty);
+        return;
+      }
+      list.forEach((c) => {
+        const card = document.createElement('div');
+        card.className = 'call-card';
+        const icon = document.createElement('div');
+        icon.className = 'call-icon';
+        const mediaIcon = c.media === 'video' ? '📹' : '📞';
+        const dirIcon = c.direction === 'out' ? '↗' : '↙';
+        icon.textContent = mediaIcon;
+        const main = document.createElement('div');
+        main.className = 'call-main';
+        const title = document.createElement('div');
+        title.className = 'call-title';
+        title.textContent = `${dirIcon} ${c.peer_name || usernameById(c.peer_id) || 'Пользователь'}`;
+        const sub = document.createElement('div');
+        sub.className = 'call-sub';
+        const dt = c.created_at ? new Date(c.created_at) : new Date();
+        sub.textContent = `${c.media === 'video' ? 'Видео' : 'Аудио'} • ${dt.toLocaleString()}`;
+        main.appendChild(title);
+        main.appendChild(sub);
+        card.appendChild(icon);
+        card.appendChild(main);
+        callsView.appendChild(card);
+      });
+    }
+
     async function loadGroupMembers(groupId) {
       if (!groupId) return;
       try {
@@ -1580,9 +1688,22 @@
       }
     }
 
+    async function loadCalls() {
+      try {
+        const calls = await api('/calls');
+        callsCache = calls;
+        renderCalls(callsCache);
+      } catch (e) {
+        if (callsView) {
+          callsView.innerHTML = `<div class="status">Не удалось загрузить звонки: ${e.message}</div>`;
+        }
+      }
+    }
+
     async function openChat(user) {
       currentGroup = null;
       currentPeer = user.id;
+      showChatView();
       clearReply();
       chatTitle.textContent = user.username;
       setChatStatus('История загружается...');
@@ -1607,6 +1728,7 @@
     async function openGroup(group) {
       currentPeer = null;
       currentGroup = group.id;
+      showChatView();
       clearReply();
       chatTitle.textContent = `# ${group.name}`;
       setChatStatus('История загружается...');
@@ -2032,16 +2154,17 @@
       document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
     }
-    if (navContacts) navContacts.onclick = () => { updateSidebar(true); hideSettings(); setActiveNav(navContacts); setChatStatus('Чаты'); };
-    if (navCalls) navCalls.onclick = () => { hideSettings(); setActiveNav(navCalls); setChatStatus('История звонков скоро появится'); };
-    if (navStories) navStories.onclick = () => { hideSettings(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
-    if (navSettings) navSettings.onclick = () => { setActiveNav(navSettings); showSettings(); };
+    if (navContacts) navContacts.onclick = () => { updateSidebar(true); hideSettings(); setActiveNav(navContacts); showChatView(); setChatStatus('Чаты'); };
+    if (navCalls) navCalls.onclick = () => { hideSettings(); setActiveNav(navCalls); showCallsView(); };
+    if (navStories) navStories.onclick = () => { hideSettings(); showChatView(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
+    if (navSettings) navSettings.onclick = () => { showChatView(); setActiveNav(navSettings); showSettings(); };
     if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
     if (btnAcceptCall) btnAcceptCall.onclick = async () => {
       if (pendingOffer) {
         const caller = usersCache.find(u => u.id === pendingOffer.sender_id) || { id: pendingOffer.sender_id, username: 'User ' + pendingOffer.sender_id };
         await openChat(caller);
         handleOffer(pendingOffer);
+        logCall(pendingOffer.media || 'audio', 'in', pendingOffer.sender_id);
       }
     };
     if (btnDeclineCall) btnDeclineCall.onclick = () => {
