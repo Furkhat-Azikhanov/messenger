@@ -241,13 +241,15 @@
     }
     .me {
       margin-left: auto;
-      background: #d9fdd3;
+      background: linear-gradient(135deg, #d9fdd3, #b2f5a5);
       border-top-right-radius: 2px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     .other {
       margin-right: auto;
-      background: #fff;
+      background: linear-gradient(135deg, #ffffff, #e7eef5);
       border-top-left-radius: 2px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     .bubble-info {
       font-size: 11px;
@@ -264,6 +266,8 @@
       gap: 10px;
       padding: 10px 12px;
       flex-wrap: wrap;
+      position: sticky;
+      bottom: 0;
     }
     .chat-input input {
       background: #2a3942;
@@ -271,15 +275,17 @@
       color: var(--text);
       flex: 1 1 auto;
       min-width: 0;
+      border-radius: 999px;
+      padding: 12px 14px;
     }
-    .chat-input button { background: var(--accent); color: #111; font-weight: 700; }
+    .chat-input button { background: var(--accent); color: #111; font-weight: 700; border-radius: 999px; }
     .mic-btn {
       background: #2a3942;
       color: var(--text);
       font-size: 18px;
       width: 42px;
       height: 38px;
-      border-radius: 8px;
+      border-radius: 50%;
       border: 1px solid #2f3b43;
       cursor: pointer;
       display: inline-flex;
@@ -434,9 +440,26 @@
       }
       .chat-header {
         gap: 10px;
+        padding: 10px 14px;
       }
       .mobile-only { display: inline-flex !important; }
       .desktop-only { display: none !important; }
+      #users button {
+        margin: 4px 8px;
+        border: 1px solid #1f2c33;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(42,57,66,0.9), rgba(34,46,54,0.9));
+      }
+      #chat {
+        padding: 14px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0.15) 100%);
+      }
+      .chat-input {
+        padding: 10px;
+        gap: 8px;
+      }
+      .attach-label { border-radius: 50%; width: 42px; height: 42px; }
+      #send-btn { width: 58px; height: 42px; border-radius: 12px; }
     }
     .mobile-only { display: none; }
     .desktop-only { display: inline-flex; }
