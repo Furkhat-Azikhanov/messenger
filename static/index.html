@@ -657,6 +657,13 @@
       </div>
     </div>
   </div>
+  <div id="incoming-call" class="hidden" style="position:fixed; bottom:76px; left:16px; right:16px; background:#1f2c33; border:1px solid #2a3942; border-radius:10px; padding:12px; z-index:7; display:flex; align-items:center; justify-content:space-between; gap:10px;">
+    <div id="incoming-call-text" style="color:#e9edef;">Входящий звонок...</div>
+    <div style="display:flex; gap:8px;">
+      <button id="btn-accept-call" style="background:#25d366; color:#0b141a;">Принять</button>
+      <button id="btn-decline-call" style="background:#b3261e; color:#fff;">Отклонить</button>
+    </div>
+  </div>
 
   <script>
     const statusEl = document.getElementById('status');
@@ -686,6 +693,10 @@
     const replyBar = document.getElementById('reply-bar');
     const replyTitle = document.getElementById('reply-title');
     const replyCancel = document.getElementById('reply-cancel');
+    const incomingCall = document.getElementById('incoming-call');
+    const incomingCallText = document.getElementById('incoming-call-text');
+    const btnAcceptCall = document.getElementById('btn-accept-call');
+    const btnDeclineCall = document.getElementById('btn-decline-call');
 
     let token = localStorage.getItem('token') || '';
     let me = null;
@@ -719,6 +730,7 @@
     let pendingVoiceFile = null;
     let recordStart = 0;
     let currentReply = null; // {id, isGroup}
+    let pendingOffer = null;
     const bottomNav = document.getElementById('bottom-nav');
     const navContacts = document.getElementById('nav-contacts');
     const navCalls = document.getElementById('nav-calls');
@@ -1024,6 +1036,15 @@
       if (remoteVideo) remoteVideo.srcObject = null;
       if (localVideo) localVideo.srcObject = null;
     }
+    function showIncomingCall(media, senderName) {
+      if (!incomingCall || !incomingCallText) return;
+      incomingCallText.textContent = `Входящий ${media === 'video' ? 'видео' : 'аудио'} звонок от ${senderName || 'пользователя'}`;
+      incomingCall.classList.remove('hidden');
+    }
+    function hideIncomingCall() {
+      if (incomingCall) incomingCall.classList.add('hidden');
+      pendingOffer = null;
+    }
 
     function cleanupCall(notify = false) {
       if (pc) {
@@ -1134,6 +1155,7 @@
     }
 
     async function handleOffer(data) {
+      hideIncomingCall();
       try {
         // Если пришёл звонок от другого, переключаемся на него
         if (currentPeer !== data.sender_id) {
@@ -1689,10 +1711,15 @@
             if (currentPeer) renderMessages(currentPeer);
           }
           else if (data.type === 'signal') {
-            if (data.signal_type === 'offer') handleOffer(data);
+            if (data.signal_type === 'offer') {
+              pendingOffer = data;
+              currentPeer = data.sender_id;
+              const name = usernameById(data.sender_id);
+              showIncomingCall(data.media, name);
+            }
             if (data.signal_type === 'answer') handleAnswer(data);
             if (data.signal_type === 'ice') handleIce(data);
-            if (data.signal_type === 'end') cleanupCall();
+            if (data.signal_type === 'end') { hideIncomingCall(); cleanupCall(); }
           }
         } catch (e) {
           console.error(e);
@@ -1937,6 +1964,14 @@
     if (navStories) navStories.onclick = () => { hideSettings(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
     if (navSettings) navSettings.onclick = () => { setActiveNav(navSettings); showSettings(); };
     if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
+    if (btnAcceptCall) btnAcceptCall.onclick = () => { if (pendingOffer) handleOffer(pendingOffer); };
+    if (btnDeclineCall) btnDeclineCall.onclick = () => {
+      hideIncomingCall();
+      if (ws && ws.readyState === WebSocket.OPEN && currentPeer) {
+        ws.send(JSON.stringify({ type: 'signal', receiver_id: currentPeer, signal_type: 'end' }));
+      }
+      cleanupCall(true);
+    };
 
     (async function init() {
       if (token) {
