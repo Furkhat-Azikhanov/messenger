@@ -546,12 +546,19 @@
     </header>
     <div id="auth-landing" class="auth-landing">
       <div class="card">
-        <h2>Вход / Регистрация</h2>
-        <label>Email <input id="landing-email" /></label>
-        <label>Код из письма <input id="landing-code" placeholder="6 цифр" /></label>
+        <div class="row" style="margin-bottom:10px;">
+          <button class="secondary" id="tab-login" style="flex:1;">Вход</button>
+          <button id="tab-register" style="flex:1;">Регистрация</button>
+        </div>
+        <label>Email <input id="landing-email" type="email" /></label>
+        <label>Пароль <input id="landing-password" type="password" /></label>
+        <div id="code-block" class="hidden">
+          <label>Код из письма <input id="landing-code" placeholder="6 цифр" /></label>
+          <button class="secondary" id="landing-resend">Отправить код ещё раз</button>
+        </div>
         <div class="row" style="margin-top:6px;">
-          <button class="secondary" id="landing-send-code">Отправить код</button>
-          <button id="landing-verify">Войти</button>
+          <button class="secondary" id="landing-action">Продолжить</button>
+          <button id="landing-verify" class="hidden">Подтвердить код</button>
         </div>
         <div class="status" id="landing-auth-status"></div>
       </div>
@@ -1700,23 +1707,39 @@
       };
     }
 
-    async function sendEmailCode() {
-      const email = (document.getElementById('landing-email')?.value || '').trim();
-      if (!email) return setAuthStatus('Введите email');
+    async function registerEmail() {
+      const email = (document.getElementById('landing-email')?.value || '').trim().toLowerCase();
+      const password = (document.getElementById('landing-password')?.value || '').trim();
+      if (!email || !password) return setAuthStatus('Введите email и пароль');
       try {
-        await api('/register_email', { method: 'POST', body: JSON.stringify({ email }) });
+        await api('/auth/register_email', { method: 'POST', body: JSON.stringify({ email, password }) });
         setAuthStatus('Код отправлен на почту');
       } catch (e) {
-        setAuthStatus('Не удалось отправить код: ' + e.message);
+        const msg = e.message || '';
+        if (msg.includes('already exists')) setAuthStatus('Email уже зарегистрирован');
+        else setAuthStatus('Не удалось отправить код: ' + msg);
       }
     }
 
-    async function verifyEmailLogin() {
-      const email = (document.getElementById('landing-email')?.value || '').trim();
+    async function resendEmailCode() {
+      const email = (document.getElementById('landing-email')?.value || '').trim().toLowerCase();
+      if (!email) return setAuthStatus('Введите email');
+      try {
+        await api('/auth/resend_email_code', { method: 'POST', body: JSON.stringify({ email }) });
+        setAuthStatus('Код отправлен');
+      } catch (e) {
+        const msg = e.message || '';
+        if (msg.includes('rate_limit')) setAuthStatus('Слишком часто, попробуйте позже');
+        else setAuthStatus('Не удалось отправить код: ' + msg);
+      }
+    }
+
+    async function verifyEmailCode() {
+      const email = (document.getElementById('landing-email')?.value || '').trim().toLowerCase();
       const code = (document.getElementById('landing-code')?.value || '').trim();
       if (!email || !code) return setAuthStatus('Введите email и код');
       try {
-        const res = await api('/verify_email', { method: 'POST', body: JSON.stringify({ email, code }) });
+        const res = await api('/auth/verify_email_code', { method: 'POST', body: JSON.stringify({ email, code }) });
         token = res.token;
         localStorage.setItem('token', token);
         await loadMe();
@@ -1726,7 +1749,35 @@
         hideAuth();
         ensurePushSubscribed();
       } catch (e) {
-        setAuthStatus('Вход не удался: ' + e.message);
+        const msg = e.message || '';
+        if (msg.includes('too_many_attempts')) setAuthStatus('Слишком много попыток, подождите');
+        else if (msg.includes('Invalid code')) setAuthStatus('Неверный или просроченный код');
+        else setAuthStatus('Не удалось подтвердить: ' + msg);
+      }
+    }
+
+    async function loginEmailPassword() {
+      const email = (document.getElementById('landing-email')?.value || '').trim().toLowerCase();
+      const password = (document.getElementById('landing-password')?.value || '').trim();
+      if (!email || !password) return setAuthStatus('Введите email и пароль');
+      try {
+        const res = await api('/auth/login_email', { method: 'POST', body: JSON.stringify({ email, password }) });
+        token = res.token;
+        localStorage.setItem('token', token);
+        await loadMe();
+        connectWs();
+        await loadUsers();
+        await loadGroups();
+        hideAuth();
+        ensurePushSubscribed();
+      } catch (e) {
+        const msg = e.message || '';
+        if (msg.includes('email_not_verified')) {
+          setAuthStatus('Email не подтверждён, отправьте код и введите его');
+          switchTab('register');
+        } else {
+          setAuthStatus('Вход не удался: ' + msg);
+        }
       }
     }
 
@@ -1796,10 +1847,37 @@
       }
     }
 
-    const landingSendCode = document.getElementById('landing-send-code');
+    const landingAction = document.getElementById('landing-action');
     const landingVerify = document.getElementById('landing-verify');
-    if (landingSendCode) landingSendCode.onclick = sendEmailCode;
-    if (landingVerify) landingVerify.onclick = verifyEmailLogin;
+    const landingResend = document.getElementById('landing-resend');
+    const tabLogin = document.getElementById('tab-login');
+    const tabRegister = document.getElementById('tab-register');
+    const codeBlock = document.getElementById('code-block');
+    let authMode = 'login'; // login | register
+    function switchTab(mode) {
+      authMode = mode;
+      if (mode === 'login') {
+        tabLogin.classList.add('secondary');
+        tabRegister.classList.remove('secondary');
+        codeBlock.classList.add('hidden');
+        landingAction.classList.remove('hidden');
+        landingVerify.classList.add('hidden');
+      } else {
+        tabRegister.classList.add('secondary');
+        tabLogin.classList.remove('secondary');
+        codeBlock.classList.remove('hidden');
+        landingAction.classList.remove('hidden');
+        landingVerify.classList.remove('hidden');
+      }
+      setAuthStatus('');
+    }
+    if (tabLogin) tabLogin.onclick = () => switchTab('login');
+    if (tabRegister) tabRegister.onclick = () => switchTab('register');
+    if (landingAction) landingAction.onclick = () => {
+      if (authMode === 'login') loginEmailPassword(); else registerEmail();
+    };
+    if (landingVerify) landingVerify.onclick = verifyEmailCode;
+    if (landingResend) landingResend.onclick = resendEmailCode;
     if (logoutBtn) logoutBtn.onclick = logout;
     document.getElementById('btn-create-group').onclick = async () => {
       const name = document.getElementById('group-name').value.trim();
