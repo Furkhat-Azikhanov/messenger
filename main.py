@@ -58,7 +58,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=True, index=True)
-    email_verified_at = Column(DateTime(timezone=True), nullable=True)
     password_hash = Column(String(128), nullable=False)
     status = Column(String(20), nullable=False, server_default="offline")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -135,6 +134,11 @@ class PushSubscription(Base):
 class RegisterRequest(BaseModel):
     username: str
     password: str
+
+
+class RegisterEmailRequest(BaseModel):
+    email: str
+    username: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -216,27 +220,6 @@ class PushSubscriptionIn(BaseModel):
 
 class StatusIn(BaseModel):
     status: str
-
-
-class EmailVerifyRequest(BaseModel):
-    email: str
-    code: str
-    username: Optional[str] = None
-
-
-class LoginEmailRequest(BaseModel):
-    email: str
-    password: str
-
-
-class RegisterEmailRequest(BaseModel):
-    email: str
-    password: str
-    username: Optional[str] = None
-
-
-class ResendEmailRequest(BaseModel):
-    email: str
 
 
 class UsernameIn(BaseModel):
@@ -326,10 +309,6 @@ def verify_password(password: str, stored: str) -> bool:
     return secrets.compare_digest(candidate, expected)
 
 
-def hash_code(code: str) -> str:
-    return hashlib.sha256(f"{code}{EMAIL_CODE_SECRET}".encode()).hexdigest()
-
-
 def create_token(user_id: int) -> str:
     token = secrets.token_urlsafe(32)
     active_tokens[token] = user_id
@@ -385,10 +364,6 @@ def smtp_enabled() -> bool:
             os.getenv("SMTP_FROM"),
         ]
     )
-
-
-EMAIL_CODE_TTL = int(os.getenv("EMAIL_CODE_TTL_SECONDS", "600"))
-EMAIL_CODE_SECRET = os.getenv("EMAIL_CODE_SECRET", "dev-secret-change-me")
 
 
 async def send_push_to_user(user_id: int, title: str, body: str, db: Session) -> None:
@@ -457,16 +432,13 @@ def on_startup() -> None:
     if "email" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN email VARCHAR(255)")
-    if "email_verified_at" not in user_cols:
-        with engine.connect() as conn:
-            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
     if "push_subscriptions" not in inspector.get_table_names():
         PushSubscription.__table__.create(bind=engine)
-    if "email_verifications" not in inspector.get_table_names():
-        EmailVerification.__table__.create(bind=engine)
+    if "verify_codes" not in inspector.get_table_names():
+        VerifyCode.__table__.create(bind=engine)
     cols_group = [c["name"] for c in inspector.get_columns("group_messages")]
     if "attachment_url" not in cols_group:
         with engine.connect() as conn:
@@ -560,54 +532,34 @@ def push_unsubscribe(
     return {"status": "removed"}
 
 
-@app.post("/auth/register_email")
-async def register_email(payload: RegisterEmailRequest, db: Session = Depends(get_db)):
-    if not smtp_enabled():
-        raise HTTPException(status_code=400, detail="SMTP not configured")
-    email = (payload.email or "").strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Invalid email")
-    existing = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+@app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    existing = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=409, detail="Email already exists")
-    # создаем пользователя
-    username = payload.username.strip() if payload.username else email.split("@")[0]
-    base = username
-    i = 1
-    while db.execute(select(User).where(User.username == username)).scalar_one_or_none():
-        username = f"{base}{i}"
-        i += 1
-    user = User(username=username, email=email, password_hash=hash_password(payload.password), status="offline")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
+
+    user = User(username=payload.username, password_hash=hash_password(payload.password))
     db.add(user)
     db.commit()
     db.refresh(user)
-    # создаем код
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    now = datetime.utcnow()
-    verification = EmailVerification(
-        user_id=user.id,
-        code_hash=hash_code(code),
-        created_at=now,
-        expires_at=now + timedelta(seconds=EMAIL_CODE_TTL),
-        attempts=0,
-        last_sent_at=now,
-        send_count=1,
+    # Уведомляем всех онлайн-пользователей о новом участнике
+    await manager.broadcast(
+        {
+            "type": "user_created",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "status": user.status,
+                "created_at": user.created_at.isoformat(),
+            },
+        }
     )
-    db.add(verification)
-    db.commit()
-    # отправляем письмо
-    try:
-        await asyncio.to_thread(send_email_code, email, code)
-    except Exception:
-        raise HTTPException(status_code=503, detail="email_send_failed")
-    return {"ok": True, "message": "code_sent"}
+    return user
 
 
 def send_email_code(email: str, code: str) -> None:
-    """Отправка одноразового кода подтверждения на email через SMTP."""
     import smtplib
     from email.mime.text import MIMEText
-    from email.utils import formataddr
 
     host = os.getenv("SMTP_HOST")
     port = int(os.getenv("SMTP_PORT", "587"))
@@ -615,19 +567,13 @@ def send_email_code(email: str, code: str) -> None:
     password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_FROM", user)
 
-    msg = MIMEText(f"Код: {code}. Действует 10 минут.")
-    msg["Subject"] = "Ваш код подтверждения"
-    # если в SMTP_FROM есть имя, приводим к корректному виду
-    if sender and " " in sender and "<" not in sender:
-        name, addr = sender.split(" ", 1)
-        sender = formataddr((name, addr))
-    msg["From"] = sender or user
+    msg = MIMEText(f"Ваш код для входа в Messenger: {code}")
+    msg["Subject"] = "Код подтверждения"
+    msg["From"] = sender
     msg["To"] = email
 
-    with smtplib.SMTP(host, port, timeout=10) as server:
-        server.ehlo()
+    with smtplib.SMTP(host, port) as server:
         server.starttls()
-        server.ehlo()
         server.login(user, password)
         server.send_message(msg)
 
@@ -660,86 +606,40 @@ class VerifyEmailIn(BaseModel):
     username: Optional[str] = None
 
 
-@app.post("/auth/resend_email_code")
-async def resend_email_code(payload: ResendEmailRequest, db: Session = Depends(get_db)):
-    if not smtp_enabled():
-        raise HTTPException(status_code=400, detail="SMTP not configured")
-    email = (payload.email or "").strip().lower()
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user:
-        # чтобы не раскрывать наличие
-        return {"ok": True, "message": "code_sent"}
-    if user.email_verified_at:
-        return {"ok": True, "message": "already_verified"}
-    now = datetime.utcnow()
-    ver = (
-        db.execute(
-            select(EmailVerification)
-            .where(EmailVerification.user_id == user.id, EmailVerification.consumed_at.is_(None))
-            .order_by(EmailVerification.id.desc())
-        )
-        .scalar_one_or_none()
-    )
-    if ver:
-        if ver.last_sent_at and (now - ver.last_sent_at).total_seconds() < 60:
-            raise HTTPException(status_code=429, detail="rate_limit")
-        if ver.send_count >= 5 and (now - ver.created_at).total_seconds() < 3600:
-            raise HTTPException(status_code=429, detail="rate_limit")
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    new_ver = EmailVerification(
-        user_id=user.id,
-        code_hash=hash_code(code),
-        created_at=now,
-        expires_at=now + timedelta(seconds=EMAIL_CODE_TTL),
-        attempts=0,
-        last_sent_at=now,
-        send_count=(ver.send_count + 1) if ver else 1,
-    )
-    if ver:
-        ver.consumed_at = now  # инвалидируем старый
-    db.add(new_ver)
-    db.commit()
-    try:
-        await asyncio.to_thread(send_email_code, email, code)
-    except Exception:
-        raise HTTPException(status_code=503, detail="email_send_failed")
-    return {"ok": True, "message": "code_resent"}
-
-
-@app.post("/auth/verify_email_code", response_model=TokenResponse)
-async def verify_email_code(payload: EmailVerifyRequest, db: Session = Depends(get_db)):
+@app.post("/verify_email", response_model=TokenResponse)
+async def verify_email(payload: VerifyEmailIn, db: Session = Depends(get_db)):
     email = (payload.email or "").strip().lower()
     code = (payload.code or "").strip()
     if not email or not code:
         raise HTTPException(status_code=400, detail="Email and code required")
-    if len(code) != 6 or not code.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid code")
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid code")
-    ver = (
+    rec = (
         db.execute(
-            select(EmailVerification)
-            .where(
-                EmailVerification.user_id == user.id,
-                EmailVerification.consumed_at.is_(None),
-                EmailVerification.expires_at > datetime.utcnow(),
-            )
-            .order_by(EmailVerification.id.desc())
+            select(VerifyCode)
+            .where(VerifyCode.email == email, VerifyCode.code == code, VerifyCode.used_at.is_(None))
+            .order_by(VerifyCode.id.desc())
         )
         .scalar_one_or_none()
     )
-    if not ver:
-        raise HTTPException(status_code=400, detail="Invalid or expired code")
-    if ver.attempts >= 5:
-        raise HTTPException(status_code=429, detail="too_many_attempts")
-    ver.attempts += 1
-    db.commit()
-    if ver.code_hash != hash_code(code):
+    if not rec:
         raise HTTPException(status_code=400, detail="Invalid code")
-    ver.consumed_at = datetime.utcnow()
-    user.email_verified_at = datetime.utcnow()
-    db.commit()
+    # отмечаем использованным
+    rec.used_at = datetime.utcnow()
+    # ищем пользователя
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if not user:
+        username = payload.username.strip() if payload.username else email.split("@")[0]
+        # гарантируем уникальность имени
+        base = username
+        i = 1
+        while db.execute(select(User).where(User.username == username)).scalar_one_or_none():
+            username = f"{base}{i}"
+            i += 1
+        user = User(username=username, email=email, password_hash=hash_password(secrets.token_urlsafe(12)))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        db.commit()
     token = create_token(user.id)
     return TokenResponse(token=token)
 
@@ -750,18 +650,6 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    token = create_token(user.id)
-    return TokenResponse(token=token)
-
-
-@app.post("/auth/login_email", response_model=TokenResponse)
-def login_email(payload: LoginEmailRequest, db: Session = Depends(get_db)):
-    email = (payload.email or "").strip().lower()
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    if not user.email_verified_at:
-        raise HTTPException(status_code=403, detail="email_not_verified")
     token = create_token(user.id)
     return TokenResponse(token=token)
 
@@ -1456,15 +1344,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(manager.broadcast({"type": "user_offline", "user_id": user.id}))
     finally:
         db.close()
-class EmailVerification(Base):
-    __tablename__ = "email_verifications"
+class VerifyCode(Base):
+    __tablename__ = "verify_codes"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, index=True, nullable=False)
-    code_hash = Column(String(128), nullable=False)
+    email = Column(String(255), index=True, nullable=False)
+    code = Column(String(10), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    attempts = Column(Integer, nullable=False, default=0)
-    last_sent_at = Column(DateTime(timezone=True), nullable=True)
-    send_count = Column(Integer, nullable=False, default=0)
-    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
