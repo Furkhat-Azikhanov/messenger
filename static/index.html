@@ -660,6 +660,9 @@
     <header>
       <div id="status">Not connected</div>
       <div class="header-actions">
+        <button class="hidden desktop-only" id="nav-chats-desktop" title="Чаты">💬</button>
+        <button class="hidden desktop-only" id="nav-calls-desktop" title="Звонки">📞</button>
+        <button class="hidden desktop-only" id="nav-stories-desktop" title="Актуальное">⭐️</button>
         <button class="mobile-only hidden" id="toggle-contacts" title="Чаты" style="display:none;">💬</button>
         <button class="hidden desktop-only" id="btn-settings-desktop" title="Настройки">⚙️</button>
         <button class="hidden desktop-only" id="btn-logout" title="Выйти">⏻</button>
@@ -874,6 +877,9 @@
     const navCalls = document.getElementById('nav-calls');
     const navStories = document.getElementById('nav-stories');
     const navSettings = document.getElementById('nav-settings');
+    const navChatsDesktop = document.getElementById('nav-chats-desktop');
+    const navCallsDesktop = document.getElementById('nav-calls-desktop');
+    const navStoriesDesktop = document.getElementById('nav-stories-desktop');
     const desktopSettingsBtn = document.getElementById('btn-settings-desktop');
     const settingsPanel = document.getElementById('settings-panel');
     // закрываем выбор реакции при клике вне или скролле
@@ -2345,6 +2351,10 @@
     if (navCalls) navCalls.onclick = () => { hideSettings(); updateSidebar(false); setActiveNav(navCalls); showCallsView(); setChatStatus('История звонков'); };
     if (navStories) navStories.onclick = () => { hideSettings(); updateSidebar(false); showChatView(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
     if (navSettings) navSettings.onclick = () => { updateSidebar(false); showChatView(); setActiveNav(navSettings); showSettings(); };
+    // Десктопные кнопки в шапке
+    if (navChatsDesktop) navChatsDesktop.onclick = () => { updateSidebar(true); hideSettings(); setActiveNav(navContacts); showChatView(); setChatStatus('Чаты'); };
+    if (navCallsDesktop) navCallsDesktop.onclick = () => { hideSettings(); updateSidebar(false); setActiveNav(navCalls); showCallsView(); setChatStatus('История звонков'); };
+    if (navStoriesDesktop) navStoriesDesktop.onclick = () => { hideSettings(); updateSidebar(false); showChatView(); setActiveNav(navStories); setChatStatus('Актуальное скоро появится'); };
     if (desktopSettingsBtn) desktopSettingsBtn.onclick = () => showSettings();
     if (btnAcceptCall) btnAcceptCall.onclick = async () => {
       if (pendingOffer) {
