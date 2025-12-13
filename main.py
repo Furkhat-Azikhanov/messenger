@@ -1263,7 +1263,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if uid != user.id:
                         await send_push_to_user(
                             uid,
-                            f"Новое сообщение в группе",
+                            user.username,
                             gmsg.content or (gmsg.attachment_name or "Вложение"),
                             db,
                         )
@@ -1330,12 +1330,12 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 await manager.send_to_user(user.id, payload)
                 await manager.send_to_user(receiver_id, payload)
-                await send_push_to_user(
-                    receiver_id,
-                    f"Новое сообщение от {user.username}",
-                    msg.content or (msg.attachment_name or "Вложение"),
-                    db,
-                )
+                        await send_push_to_user(
+                            receiver_id,
+                            user.username,
+                            msg.content or (msg.attachment_name or "Вложение"),
+                            db,
+                        )
     except WebSocketDisconnect:
         manager.disconnect(user.id if "user" in locals() else 0, websocket)
         if "user" in locals():
