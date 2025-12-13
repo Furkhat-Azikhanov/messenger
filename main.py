@@ -235,6 +235,10 @@ class RegisterEmailRequest(BaseModel):
     username: Optional[str] = None
 
 
+class ResendEmailRequest(BaseModel):
+    email: str
+
+
 class UsernameIn(BaseModel):
     username: str
 
@@ -649,7 +653,7 @@ class VerifyEmailIn(BaseModel):
 
 
 @app.post("/auth/resend_email_code")
-async def resend_email_code(payload: RegisterEmailRequest, db: Session = Depends(get_db)):
+async def resend_email_code(payload: ResendEmailRequest, db: Session = Depends(get_db)):
     if not smtp_enabled():
         raise HTTPException(status_code=400, detail="SMTP not configured")
     email = (payload.email or "").strip().lower()
