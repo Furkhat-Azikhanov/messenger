@@ -32,6 +32,12 @@
       <input id="new-password" placeholder="password" type="password" />
       <button id="btn-create-user">Создать</button>
     </div>
+    <div style="display:flex; gap:8px; flex-wrap: wrap; margin-top:10px;">
+      <select id="export-user1" style="min-width:140px;"></select>
+      <select id="export-user2" style="min-width:140px;"></select>
+      <button id="btn-export-chat" class="secondary">Выгрузить переписку (CSV)</button>
+      <span class="small">Выберите двух пользователей и скачайте CSV (откроется в Excel).</span>
+    </div>
     <div style="margin-top:10px; max-height:240px; overflow:auto;">
       <table id="users-table">
         <thead><tr><th>ID</th><th>Username</th><th>Password (hash)</th><th>Created</th><th></th></tr></thead>
@@ -66,6 +72,8 @@
     const headers = () => admToken ? { 'Authorization': 'Bearer ' + admToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 
     const userNames = new Map();
+    const userSelect1 = document.getElementById('export-user1');
+    const userSelect2 = document.getElementById('export-user2');
 
     async function api(path, options = {}) {
       const res = await fetch(path, { cache: 'no-store', ...options, headers: { ...(options.headers || {}), ...headers() } });
@@ -81,6 +89,22 @@
       const users = await api('/admin/users');
       userNames.clear();
       users.forEach(u => userNames.set(u.id, u.username));
+      // заполнить селекты экспорта
+      const fillSelect = (sel) => {
+        sel.innerHTML = '';
+        const optEmpty = document.createElement('option');
+        optEmpty.value = '';
+        optEmpty.textContent = 'Выбрать...';
+        sel.appendChild(optEmpty);
+        users.forEach(u => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = `${u.id} — ${u.username}`;
+          sel.appendChild(opt);
+        });
+      };
+      fillSelect(userSelect1);
+      fillSelect(userSelect2);
       const tbody = document.querySelector('#users-table tbody');
       tbody.innerHTML = '';
       users.forEach(u => {
@@ -182,6 +206,28 @@
       document.getElementById('new-username').value = '';
       document.getElementById('new-password').value = '';
       await loadUsers();
+    };
+    document.getElementById('btn-export-chat').onclick = async () => {
+      const u1 = userSelect1.value;
+      const u2 = userSelect2.value;
+      if (!u1 || !u2 || u1 === u2) {
+        alert('Выберите двух разных пользователей');
+        return;
+      }
+      const url = `/admin/export_chat?user1=${encodeURIComponent(u1)}&user2=${encodeURIComponent(u2)}`;
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + admToken } });
+      if (!res.ok) {
+        const t = await res.text();
+        alert('Ошибка: ' + t);
+        return;
+      }
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `chat_${u1}_${u2}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     };
 
     async function init() {
