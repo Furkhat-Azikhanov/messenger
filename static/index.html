@@ -440,6 +440,39 @@
       padding: 6px 8px;
       cursor: pointer;
     }
+    .pinned-bar {
+      background: #10222b;
+      border-bottom: 1px solid #1f2c33;
+      padding: 6px 10px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      align-items: center;
+    }
+    .pinned-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      color: #e9edef;
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .pinned-item button {
+      background: transparent;
+      border: none;
+      color: #e9edef;
+      padding: 0 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
     .reply-bar {
       display: flex;
       align-items: center;
@@ -723,6 +756,7 @@
           <div class="members-list"></div>
           <div class="close" id="group-info-close">×</div>
         </div>
+        <div id="pinned-bar" class="pinned-bar hidden"></div>
 
         <div class="call-area">
           <div class="video-box">
@@ -801,6 +835,7 @@
     const chatEl = document.getElementById('chat');
     const chatTitle = document.getElementById('chat-title');
     const chatStatus = document.getElementById('chat-status');
+    const pinnedBar = document.getElementById('pinned-bar');
     const messageInput = document.getElementById('message-input');
     const remoteVideo = document.getElementById('remoteVideo');
     const localVideo = document.getElementById('localVideo');
@@ -876,6 +911,8 @@
     const navSettings = document.getElementById('nav-settings');
     const desktopSettingsBtn = document.getElementById('btn-settings-desktop');
     const settingsPanel = document.getElementById('settings-panel');
+    const pinnedDm = new Map();   // peerId -> pinned list
+    const pinnedGroups = new Map(); // groupId -> pinned list
     // закрываем выбор реакции при клике вне или скролле
     document.addEventListener('click', (e) => {
       if (!reactionPicker) return;
@@ -1037,6 +1074,14 @@
         };
         reactionPicker.appendChild(btn);
       });
+      const pinBtn = document.createElement('button');
+      pinBtn.textContent = '📌';
+      pinBtn.title = 'Закрепить';
+      pinBtn.onclick = async () => {
+        await pinMessage(msg, isGroup, groupId);
+        closeReactionPicker();
+      };
+      reactionPicker.appendChild(pinBtn);
       // Показ с измерением размеров и клэмпингом в пределах экрана
       reactionPicker.style.visibility = 'hidden';
       reactionPicker.style.display = 'flex';
@@ -1196,6 +1241,25 @@
     function clearReply() {
       currentReply = null;
       if (replyBar) replyBar.classList.add('hidden');
+    }
+    async function pinMessage(msg, isGroup = false, groupId = null) {
+      try {
+        if (isGroup) {
+          await api(`/group_messages/${msg.id}/pin`, { method: 'POST' });
+          if (groupId) {
+            pinnedGroups.set(groupId, await api(`/group_pinned/${groupId}`));
+            renderPinnedBar(groupId, true);
+          }
+        } else {
+          await api(`/messages/${msg.id}/pin`, { method: 'POST' });
+          const peerId = msg.sender_id === me.id ? msg.receiver_id : msg.sender_id;
+          pinnedDm.set(peerId, await api(`/pinned/${peerId}`));
+          renderPinnedBar(peerId, false);
+        }
+        setChatStatus('Закреплено');
+      } catch (e) {
+        setChatStatus('Не удалось закрепить: ' + e.message);
+      }
     }
     function showSettings() {
       if (settingsPanel) {
@@ -1698,6 +1762,7 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        wrap.dataset.mid = m.id;
         wrap.onclick = () => setReply(m, false, null);
         attachSwipeToReply(wrap, m, false, null);
         attachReactionTrigger(wrap, m, false, null);
@@ -1727,6 +1792,7 @@
         chatEl.appendChild(wrap);
       });
       chatEl.scrollTop = chatEl.scrollHeight;
+      renderPinnedBar(peerId, false);
     }
 
     function renderGroupMessages(groupId) {
@@ -1736,6 +1802,7 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        wrap.dataset.mid = m.id;
         wrap.onclick = () => setReply(m, true, groupId);
         attachSwipeToReply(wrap, m, true, groupId);
         attachReactionTrigger(wrap, m, true, groupId);
@@ -1766,6 +1833,7 @@
         chatEl.appendChild(wrap);
       });
       chatEl.scrollTop = chatEl.scrollHeight;
+      renderPinnedBar(groupId, true);
     }
 
     function renderCalls(list) {
@@ -1846,6 +1914,45 @@
       }
     }
 
+    function renderPinnedBar(key, isGroup) {
+      if (!pinnedBar) return;
+      const list = isGroup ? pinnedGroups.get(key) || [] : pinnedDm.get(key) || [];
+      if (!list.length) {
+        pinnedBar.classList.add('hidden');
+        pinnedBar.innerHTML = '';
+        return;
+      }
+      pinnedBar.innerHTML = '';
+      list.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'pinned-item';
+        div.dataset.mid = item.message.id;
+        const text = item.message.content || item.message.attachment_name || 'Вложение';
+        div.textContent = `📌 ${text.slice(0, 60)}`;
+        div.onclick = () => {
+          const target = chatEl.querySelector(`[data-mid="${item.message.id}"]`);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+        const btn = document.createElement('button');
+        btn.textContent = '×';
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (isGroup) {
+            await api(`/group_messages/${item.message.id}/pin`, { method: 'DELETE' });
+            pinnedGroups.set(key, await api(`/group_pinned/${key}`));
+            renderPinnedBar(key, true);
+          } else {
+            await api(`/messages/${item.message.id}/pin`, { method: 'DELETE' });
+            pinnedDm.set(key, await api(`/pinned/${key}`));
+            renderPinnedBar(key, false);
+          }
+        };
+        div.appendChild(btn);
+        pinnedBar.appendChild(div);
+      });
+      pinnedBar.classList.remove('hidden');
+    }
+
     async function loadGroups() {
       try {
         const groups = await api('/groups');
@@ -1880,6 +1987,7 @@
       try {
         const history = await api(`/messages/${user.id}`);
         conversations[user.id] = history;
+        pinnedDm.set(user.id, await api(`/pinned/${user.id}`));
         renderMessages(user.id);
         setChatStatus('Онлайн чат');
         renderUsers(await api('/users'));
@@ -1904,6 +2012,7 @@
       try {
         const history = await api(`/group_messages/${group.id}`);
         conversations[`g:${group.id}`] = history;
+        pinnedGroups.set(group.id, await api(`/group_pinned/${group.id}`));
         renderGroupMessages(group.id);
         setChatStatus('Групповой чат');
         await loadGroups();
@@ -1921,6 +2030,7 @@
       const peerId = msg.sender_id === me.id ? msg.receiver_id : msg.sender_id;
       conversations[peerId] = conversations[peerId] || [];
       conversations[peerId].push(msg);
+      // если это закреплённое событие придёт отдельно
       if (peerId === currentPeer) {
         renderMessages(peerId);
         markRead(peerId);
@@ -2043,6 +2153,30 @@
             addGroupFromPush(data.group);
           } else if (data.type === 'group_deleted' && data.group_id) {
             handleGroupDeleted(data.group_id);
+          } else if (data.type === 'pin' && data.message) {
+            const peerId = data.message.sender_id === me.id ? data.message.receiver_id : data.message.sender_id;
+            const list = pinnedDm.get(peerId) || [];
+            if (data.pinned) {
+              list.unshift({ message: data.message, pinned_at: new Date().toISOString() });
+            } else {
+              const filtered = list.filter(p => p.message.id !== data.message.id);
+              list.length = 0;
+              filtered.forEach(x => list.push(x));
+            }
+            pinnedDm.set(peerId, list);
+            if (peerId === currentPeer && !currentGroup) renderPinnedBar(peerId, false);
+          } else if (data.type === 'group_pin' && data.message) {
+            const gid = data.group_id;
+            const list = pinnedGroups.get(gid) || [];
+            if (data.pinned) {
+              list.unshift({ message: data.message, pinned_at: new Date().toISOString() });
+            } else {
+              const filtered = list.filter(p => p.message.id !== data.message.id);
+              list.length = 0;
+              filtered.forEach(x => list.push(x));
+            }
+            pinnedGroups.set(gid, list);
+            if (gid === currentGroup) renderPinnedBar(gid, true);
           } else if (data.type === 'user_created' && data.user) {
             addUserFromPush(data.user);
             loadUsers(); // синхронизируем список на всякий случай
@@ -2407,6 +2541,12 @@
       updateSidebar(false);
       if (groupInfo) groupInfo.classList.add('hidden');
       updateGroupMenuVisibility();
+      pinnedDm.clear();
+      pinnedGroups.clear();
+      if (pinnedBar) {
+        pinnedBar.innerHTML = '';
+        pinnedBar.classList.add('hidden');
+      }
     }
   </script>
 </body>

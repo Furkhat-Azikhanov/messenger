@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
 from sqlalchemy import desc, or_
 from sqlalchemy import inspect
+from sqlalchemy import and_
 from pywebpush import webpush, WebPushException
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
@@ -164,6 +165,16 @@ class GroupMessageReaction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PinnedMessage(Base):
+    __tablename__ = "pinned_messages"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    is_group = Column(Integer, nullable=False, default=0)  # 0 = dm, 1 = group
+    group_id = Column(Integer, index=True, nullable=True)
+    pinned_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # --- Модели запросов/ответов ---
 class RegisterRequest(BaseModel):
     username: str
@@ -285,6 +296,11 @@ class GroupMessageOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class PinnedOut(BaseModel):
+    message: MessageOut
+    pinned_at: datetime
 
 
 class PushSubscriptionIn(BaseModel):
@@ -531,6 +547,8 @@ def on_startup() -> None:
         MessageReaction.__table__.create(bind=engine)
     if "group_message_reactions" not in inspector.get_table_names():
         GroupMessageReaction.__table__.create(bind=engine)
+    if "pinned_messages" not in inspector.get_table_names():
+        PinnedMessage.__table__.create(bind=engine)
 
 
 @app.get("/", response_class=FileResponse)
@@ -788,6 +806,38 @@ def build_reaction_map(
             bucket[emoji].me = True
     # convert to list
     return {mid: list(b.values()) for mid, b in result.items()}
+
+
+def message_to_dict(msg: Message) -> dict:
+    return {
+        "id": msg.id,
+        "sender_id": msg.sender_id,
+        "receiver_id": msg.receiver_id,
+        "content": msg.content,
+        "attachment_url": msg.attachment_url,
+        "attachment_type": msg.attachment_type,
+        "attachment_name": msg.attachment_name,
+        "reply_to_id": msg.reply_to_id,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        "read_at": msg.read_at.isoformat() if msg.read_at else None,
+        "reactions": [],
+    }
+
+
+def group_message_to_dict(msg: GroupMessage) -> dict:
+    return {
+        "id": msg.id,
+        "group_id": msg.group_id,
+        "sender_id": msg.sender_id,
+        "content": msg.content,
+        "attachment_url": msg.attachment_url,
+        "attachment_type": msg.attachment_type,
+        "attachment_name": msg.attachment_name,
+        "reply_to_id": msg.reply_to_id,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        "read_by": [],
+        "reactions": [],
+    }
 
 
 @app.post("/status")
@@ -1121,6 +1171,15 @@ def history(
     return list(reversed(rows))
 
 
+@app.get("/pinned/{peer_id}", response_model=List[PinnedOut])
+def pinned_dm(
+    peer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return pinned_dm_list(db, current_user.id, peer_id, current_user.id)
+
+
 @app.post("/messages/{peer_id}/read")
 async def mark_read(
     peer_id: int,
@@ -1321,6 +1380,25 @@ def group_history(
     return list(reversed(msgs))
 
 
+@app.get("/group_pinned/{group_id}", response_model=List[PinnedOut])
+def group_pinned(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+    return pinned_group_list(db, group_id, current_user.id)
+
+
 @app.post("/group_messages/{group_id}/read")
 async def group_mark_read(
     group_id: int,
@@ -1457,6 +1535,57 @@ async def react_message(
     return reactions
 
 
+@app.post("/messages/{message_id}/pin", response_model=List[PinnedOut])
+async def pin_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db.query(PinnedMessage).filter(PinnedMessage.message_id == message_id).delete()
+    db.add(PinnedMessage(message_id=message_id, is_group=0))
+    db.commit()
+    pins = pinned_dm_list(db, msg.sender_id, msg.receiver_id, current_user.id)
+    payload_ws = {
+        "type": "pin",
+        "message": message_to_dict(msg),
+        "pinned": True,
+    }
+    await manager.send_to_user(msg.sender_id, payload_ws)
+    if msg.receiver_id != msg.sender_id:
+        await manager.send_to_user(msg.receiver_id, payload_ws)
+    return pins
+
+
+@app.delete("/messages/{message_id}/pin", response_model=List[PinnedOut])
+async def unpin_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db.query(PinnedMessage).filter(PinnedMessage.message_id == message_id).delete()
+    db.commit()
+    pins = pinned_dm_list(db, msg.sender_id, msg.receiver_id, current_user.id)
+    payload_ws = {
+        "type": "pin",
+        "message": message_to_dict(msg),
+        "pinned": False,
+    }
+    await manager.send_to_user(msg.sender_id, payload_ws)
+    if msg.receiver_id != msg.sender_id:
+        await manager.send_to_user(msg.receiver_id, payload_ws)
+    return pins
+
+
 @app.post("/group_messages/{message_id}/react", response_model=List[ReactionOut])
 async def react_group_message(
     message_id: int,
@@ -1506,6 +1635,128 @@ async def react_group_message(
     }
     await manager.broadcast(payload_ws)
     return reactions
+
+
+@app.post("/group_messages/{message_id}/pin", response_model=List[PinnedOut])
+async def pin_group_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=403, detail="Not in group")
+    db.query(PinnedMessage).filter(PinnedMessage.message_id == message_id).delete()
+    db.add(PinnedMessage(message_id=message_id, is_group=1, group_id=msg.group_id))
+    db.commit()
+    pins = pinned_group_list(db, msg.group_id, current_user.id)
+    payload_ws = {
+        "type": "group_pin",
+        "group_id": msg.group_id,
+        "message": group_message_to_dict(msg),
+        "pinned": True,
+    }
+    await manager.broadcast(payload_ws)
+    return pins
+
+
+@app.delete("/group_messages/{message_id}/pin", response_model=List[PinnedOut])
+async def unpin_group_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(GroupMessage, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=403, detail="Not in group")
+    db.query(PinnedMessage).filter(PinnedMessage.message_id == message_id).delete()
+    db.commit()
+    pins = pinned_group_list(db, msg.group_id, current_user.id)
+    payload_ws = {
+        "type": "group_pin",
+        "group_id": msg.group_id,
+        "message": group_message_to_dict(msg),
+        "pinned": False,
+    }
+    await manager.broadcast(payload_ws)
+    return pins
+
+
+def pinned_dm_list(db: Session, user1: int, user2: int, current_user_id: int) -> List[PinnedOut]:
+    rows = (
+        db.execute(
+            select(PinnedMessage, Message)
+            .join(Message, Message.id == PinnedMessage.message_id)
+            .where(
+                PinnedMessage.is_group == 0,
+                or_(
+                    and_(Message.sender_id == user1, Message.receiver_id == user2),
+                    and_(Message.sender_id == user2, Message.receiver_id == user1),
+                ),
+            )
+            .order_by(PinnedMessage.id.desc())
+        )
+        .all()
+    )
+    result: List[PinnedOut] = []
+    for pm, msg in rows:
+        msg.reactions = build_reactions_for_message(db, msg.id, current_user_id)
+        result.append(PinnedOut(message=MessageOut.from_orm(msg), pinned_at=pm.pinned_at))
+    return result
+
+
+def pinned_group_list(db: Session, group_id: int, current_user_id: int) -> List[PinnedOut]:
+    rows = (
+        db.execute(
+            select(PinnedMessage, GroupMessage)
+            .join(GroupMessage, GroupMessage.id == PinnedMessage.message_id)
+            .where(PinnedMessage.is_group == 1, PinnedMessage.group_id == group_id)
+            .order_by(PinnedMessage.id.desc())
+        )
+        .all()
+    )
+    result: List[PinnedOut] = []
+    for pm, msg in rows:
+        msg.reactions = build_reactions_for_group_message(db, msg.id, current_user_id)
+        result.append(
+            PinnedOut(
+                message=GroupMessageOut(
+                    id=msg.id,
+                    group_id=msg.group_id,
+                    sender_id=msg.sender_id,
+                    content=msg.content,
+                    attachment_url=msg.attachment_url,
+                    attachment_type=msg.attachment_type,
+                    attachment_name=msg.attachment_name,
+                    reply_to_id=msg.reply_to_id,
+                    created_at=msg.created_at,
+                    read_by=[],
+                    reactions=msg.reactions,
+                ),
+                pinned_at=pm.pinned_at,
+            )
+        )
+    return result
 
 
 @app.websocket("/ws")
