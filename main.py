@@ -549,6 +549,14 @@ def on_startup() -> None:
         GroupMessageReaction.__table__.create(bind=engine)
     if "pinned_messages" not in inspector.get_table_names():
         PinnedMessage.__table__.create(bind=engine)
+    else:
+        cols_pin = [c["name"] for c in inspector.get_columns("pinned_messages")]
+        if "is_group" not in cols_pin:
+            with engine.connect() as conn:
+                conn.exec_driver_sql("ALTER TABLE pinned_messages ADD COLUMN is_group BOOLEAN DEFAULT FALSE")
+        if "group_id" not in cols_pin:
+            with engine.connect() as conn:
+                conn.exec_driver_sql("ALTER TABLE pinned_messages ADD COLUMN group_id INTEGER")
 
 
 @app.get("/", response_class=FileResponse)
