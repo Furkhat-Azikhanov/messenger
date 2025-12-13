@@ -1017,6 +1017,12 @@
       el.addEventListener('mousedown', start);
       el.addEventListener('mouseleave', cancel);
       el.addEventListener('mouseup', cancel);
+      // ПК: контекстное меню открывает реакции сразу
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        openReactionPicker(rect.left + rect.width / 2, rect.top, msg, isGroup, groupId);
+      });
     }
     function openReactionPicker(x, y, msg, isGroup = false, groupId = null) {
       if (!reactionPicker) return;
