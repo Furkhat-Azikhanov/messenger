@@ -756,6 +756,12 @@
       if (show) sidebar.classList.add('show');
       else sidebar.classList.remove('show');
     }
+    function focusInputForKeyboard() {
+      if (!messageInput) return;
+      messageInput.focus({ preventScroll: true });
+      messageInput.click();
+      setTimeout(() => messageInput.focus({ preventScroll: true }), 80);
+    }
 
     window.matchMedia('(max-width: 900px)').addEventListener('change', (e) => {
       isMobile = e.matches;
@@ -1502,7 +1508,7 @@
         await markRead(user.id);
         updateSidebar(false);
         updateGroupMenuVisibility();
-        setTimeout(() => messageInput?.focus(), 50);
+        if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
@@ -1526,7 +1532,7 @@
         updateGroupMenuVisibility();
         if (groupInfo) groupInfo.classList.add('hidden'); // покажем участников только по клику
         await markGroupRead(group.id);
-        setTimeout(() => messageInput?.focus(), 50);
+        if (isMobile) setTimeout(() => focusInputForKeyboard(), 50);
       } catch (e) {
         setChatStatus('Не удалось загрузить историю: ' + e.message);
       }
