@@ -1962,7 +1962,7 @@
       addItem('📌', 'Закрепить', () => {}, false);
       addItem('⭐', 'В \"Избранные\"', () => {}, false);
       addItem('⚠', 'Пожаловаться', () => {}, false);
-      addItem('🗑', 'Удалить', () => {}, false);
+      addItem('🗑', 'Удалить', () => deleteMessageClient(msg, isGroup, groupId));
       return menu;
     }
 
