@@ -427,6 +427,8 @@
       padding: 6px 8px;
       display: none;
       gap: 6px;
+      flex-wrap: wrap;
+      max-width: 240px;
       box-shadow: 0 8px 20px rgba(0,0,0,0.35);
     }
     .reaction-picker button {
@@ -843,6 +845,8 @@
     const settingsUsernameInput = document.getElementById('settings-username');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
+    if (chatEl) chatEl.addEventListener('scroll', closeReactionPicker);
+    window.addEventListener('resize', closeReactionPicker);
     let pc = null;
     let localStream = null;
     let currentMedia = 'audio';
@@ -872,6 +876,17 @@
     const navSettings = document.getElementById('nav-settings');
     const desktopSettingsBtn = document.getElementById('btn-settings-desktop');
     const settingsPanel = document.getElementById('settings-panel');
+    // закрываем выбор реакции при клике вне или скролле
+    document.addEventListener('click', (e) => {
+      if (!reactionPicker) return;
+      if (reactionPicker.style.display === 'none') return;
+      if (!reactionPicker.contains(e.target)) closeReactionPicker();
+    });
+    document.addEventListener('touchstart', (e) => {
+      if (!reactionPicker) return;
+      if (reactionPicker.style.display === 'none') return;
+      if (!reactionPicker.contains(e.target)) closeReactionPicker();
+    }, { passive: true });
     function attachSwipeToReply(el, msg, isGroup = false, groupId = null) {
       let startX = 0;
       let moved = false;
@@ -1016,10 +1031,20 @@
         };
         reactionPicker.appendChild(btn);
       });
+      // Показ с измерением размеров и клэмпингом в пределах экрана
+      reactionPicker.style.visibility = 'hidden';
       reactionPicker.style.display = 'flex';
-      const offset = 10;
-      reactionPicker.style.left = `${x - reactionPicker.offsetWidth / 2}px`;
-      reactionPicker.style.top = `${y - reactionPicker.offsetHeight - offset}px`;
+      const pad = 12;
+      const rect = reactionPicker.getBoundingClientRect();
+      const width = rect.width || 200;
+      const height = rect.height || 40;
+      let left = x - width / 2;
+      left = Math.max(pad, Math.min(left, window.innerWidth - width - pad));
+      let top = y - height - pad;
+      if (top < pad) top = pad;
+      reactionPicker.style.left = `${left}px`;
+      reactionPicker.style.top = `${top}px`;
+      reactionPicker.style.visibility = 'visible';
     }
     function closeReactionPicker() {
       if (reactionPicker) reactionPicker.style.display = 'none';
