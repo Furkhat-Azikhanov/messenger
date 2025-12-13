@@ -557,6 +557,9 @@ def on_startup() -> None:
         if "group_id" not in cols_pin:
             with engine.connect() as conn:
                 conn.exec_driver_sql("ALTER TABLE pinned_messages ADD COLUMN group_id INTEGER")
+        if "pinned_at" not in cols_pin:
+            with engine.connect() as conn:
+                conn.exec_driver_sql("ALTER TABLE pinned_messages ADD COLUMN pinned_at TIMESTAMP DEFAULT NOW()")
 
 
 @app.get("/", response_class=FileResponse)
