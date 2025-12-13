@@ -396,6 +396,37 @@
       border-left: 3px solid #25d366;
     }
     .reply-preview .author { font-weight: 700; }
+    .reactions {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .reaction-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: #2a3942;
+      color: #e9edef;
+      border: 1px solid #2f3b43;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .reaction-pill.me {
+      border-color: var(--accent);
+      background: rgba(37,211,102,0.15);
+    }
+    .reaction-add {
+      padding: 3px 8px;
+      border-radius: 12px;
+      border: 1px dashed #2f3b43;
+      background: transparent;
+      color: #e9edef;
+      font-size: 12px;
+      cursor: pointer;
+    }
     .reply-bar {
       display: flex;
       align-items: center;
@@ -794,6 +825,7 @@
     const onlineUsers = new Set();
     const statusIcons = { online: '🟢', chat: '💬', dnd: '⛔️', offline: '🔴' };
     const statusLabels = { online: 'Онлайн', chat: 'Готов поболтать', dnd: 'Не беспокоить', offline: 'Отключен' };
+    const reactionEmojis = ['👍','❤️','😂','😮','😢','🙏'];
     const settingsUsernameInput = document.getElementById('settings-username');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
@@ -1535,6 +1567,52 @@
       return wrap;
     }
 
+    function applyReactionUpdate(key, messageId, reactions) {
+      const arr = conversations[key] || [];
+      const idx = arr.findIndex(m => m.id === messageId);
+      if (idx >= 0) {
+        arr[idx].reactions = reactions;
+      }
+    }
+
+    async function sendReaction(msg, emoji, isGroup = false, groupId = null) {
+      const path = isGroup ? `/group_messages/${msg.id}/react` : `/messages/${msg.id}/react`;
+      try {
+        const res = await api(path, { method: 'POST', body: JSON.stringify({ emoji }) });
+        const key = isGroup ? `g:${groupId}` : (msg.sender_id === me.id ? msg.receiver_id : msg.sender_id);
+        applyReactionUpdate(key, msg.id, res);
+        if (isGroup) renderGroupMessages(groupId);
+        else renderMessages(key);
+      } catch (e) {
+        setChatStatus('Не удалось добавить реакцию: ' + e.message);
+      }
+    }
+
+    function renderReactions(m, isGroup = false, groupId = null) {
+      const wrap = document.createElement('div');
+      wrap.className = 'reactions';
+      const list = m.reactions || [];
+      list.forEach(r => {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'reaction-pill' + (r.me ? ' me' : '');
+        pill.textContent = `${r.emoji} ${r.count}`;
+        pill.onclick = () => sendReaction(m, r.emoji, isGroup, groupId);
+        wrap.appendChild(pill);
+      });
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'reaction-add';
+      addBtn.textContent = '➕';
+      addBtn.onclick = () => {
+        const choice = prompt('Выбери или введи эмодзи', reactionEmojis.join(' ')) || '';
+        const emoji = choice.trim().split(/\s+/)[0] || '';
+        if (emoji) sendReaction(m, emoji, isGroup, groupId);
+      };
+      wrap.appendChild(addBtn);
+      return wrap;
+    }
+
     function renderMessages(peerId) {
       chatEl.innerHTML = '';
       const msgs = conversations[peerId] || [];
@@ -1562,8 +1640,10 @@
         if (m.sender_id === me?.id) {
           ticks = m.read_at ? ' ✓✓' : ' ✓';
         }
-        meta.textContent = `${usernameById(m.sender_id)} • ${date}${ticks}`;
+        const edited = m.edited_at ? ' (изменено)' : '';
+        meta.textContent = `${usernameById(m.sender_id)} • ${date}${ticks}${edited}`;
         wrap.appendChild(meta);
+        wrap.appendChild(renderReactions(m, false, null));
 
         chatEl.appendChild(wrap);
       });
@@ -1598,8 +1678,10 @@
           const readers = m.read_by || [];
           ticks = readers.length ? ' ✓✓' : ' ✓';
         }
-        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}${ticks}`;
+        const edited = m.edited_at ? ' (изменено)' : '';
+        meta.textContent = `${usernameById(m.sender_id, groupId)} • ${date}${ticks}${edited}`;
         wrap.appendChild(meta);
+        wrap.appendChild(renderReactions(m, true, groupId));
 
         chatEl.appendChild(wrap);
       });
@@ -1906,6 +1988,22 @@
               });
             });
             if (currentPeer) renderMessages(currentPeer);
+          } else if (data.type === 'reaction' && data.message_id) {
+            const peerId = currentPeer || data.peer_id || null;
+            const keys = Object.keys(conversations);
+            keys.forEach(k => {
+              const arr = conversations[k] || [];
+              const idx = arr.findIndex(m => m.id === data.message_id);
+              if (idx >= 0) arr[idx].reactions = data.reactions || [];
+            });
+            if (currentPeer) renderMessages(currentPeer);
+          } else if (data.type === 'group_reaction' && data.message_id) {
+            const gid = data.group_id;
+            const key = `g:${gid}`;
+            const arr = conversations[key] || [];
+            const idx = arr.findIndex(m => m.id === data.message_id);
+            if (idx >= 0) arr[idx].reactions = data.reactions || [];
+            if (currentGroup === gid) renderGroupMessages(gid);
           }
           else if (data.type === 'signal') {
             if (data.signal_type === 'offer') {

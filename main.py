@@ -142,6 +142,26 @@ class CallLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    user_id = Column(Integer, index=True, nullable=False)
+    emoji = Column(String(16), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GroupMessageReaction(Base):
+    __tablename__ = "group_message_reactions"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, index=True, nullable=False)
+    user_id = Column(Integer, index=True, nullable=False)
+    emoji = Column(String(16), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # --- Модели запросов/ответов ---
 class RegisterRequest(BaseModel):
     username: str
@@ -197,6 +217,7 @@ class MessageOut(BaseModel):
     reply_to_id: Optional[int] = None
     created_at: datetime
     read_at: Optional[datetime] = None
+    reactions: List[ReactionOut] = []
 
     class Config:
         orm_mode = True
@@ -244,6 +265,7 @@ class GroupMessageOut(BaseModel):
     reply_to_id: Optional[int] = None
     created_at: datetime
     read_by: List[int] = []
+    reactions: List[dict] = []
 
     class Config:
         orm_mode = True
@@ -270,6 +292,20 @@ class GroupMemberOut(BaseModel):
 
 class PushUnsubscribeIn(BaseModel):
     endpoint: str
+
+
+class ReactionIn(BaseModel):
+    emoji: str
+
+
+class ReactionOut(BaseModel):
+    emoji: str
+    count: int
+    me: bool = False
+
+
+def reaction_dict_list(reactions: List[ReactionOut]) -> List[dict]:
+    return [r.dict() for r in reactions]
 
 
 # --- Безопасность ---
@@ -488,6 +524,11 @@ def on_startup() -> None:
     if "reply_to_id" not in cols_group:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE group_messages ADD COLUMN reply_to_id INTEGER")
+    # создаём таблицы реакций, если отсутствуют
+    if "message_reactions" not in inspector.get_table_names():
+        MessageReaction.__table__.create(bind=engine)
+    if "group_message_reactions" not in inspector.get_table_names():
+        GroupMessageReaction.__table__.create(bind=engine)
 
 
 @app.get("/", response_class=FileResponse)
@@ -727,6 +768,24 @@ def me(current_user: User = Depends(get_current_user)):
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     users = db.execute(select(User).order_by(User.id)).scalars().all()
     return users
+
+
+def build_reaction_map(
+    reactions: List[tuple[int, int, str]],
+    current_user_id: int,
+) -> Dict[int, List[ReactionOut]]:
+    result: Dict[int, Dict[str, ReactionOut]] = {}
+    for msg_id, user_id, emoji in reactions:
+        if msg_id not in result:
+            result[msg_id] = {}
+        bucket = result[msg_id]
+        if emoji not in bucket:
+            bucket[emoji] = ReactionOut(emoji=emoji, count=0, me=False)
+        bucket[emoji].count += 1
+        if user_id == current_user_id:
+            bucket[emoji].me = True
+    # convert to list
+    return {mid: list(b.values()) for mid, b in result.items()}
 
 
 @app.post("/status")
@@ -988,6 +1047,17 @@ def history(
         .limit(limit)
     )
     rows = db.execute(stmt).scalars().all()
+    # реакции
+    ids = [m.id for m in rows]
+    if ids:
+        reaction_rows = db.execute(
+            select(MessageReaction.message_id, MessageReaction.user_id, MessageReaction.emoji).where(
+                MessageReaction.message_id.in_(ids)
+            )
+        ).all()
+        reaction_map = build_reaction_map(reaction_rows, current_user.id)
+        for m in rows:
+            m.reactions = reaction_map.get(m.id, [])
     # Вернём в обратном порядке, чтобы шло по времени
     return list(reversed(rows))
 
@@ -1171,6 +1241,7 @@ def group_history(
     # добавим read_by для сообщений текущего пользователя
     ids = [m.id for m in msgs]
     read_map = {}
+    reaction_map: Dict[int, List[ReactionOut]] = {}
     if ids:
         reads = db.execute(
             select(GroupMessageRead.message_id, GroupMessageRead.user_id).where(
@@ -1179,8 +1250,15 @@ def group_history(
         ).all()
         for mid, uid in reads:
             read_map.setdefault(mid, []).append(uid)
+        reaction_rows = db.execute(
+            select(GroupMessageReaction.message_id, GroupMessageReaction.user_id, GroupMessageReaction.emoji).where(
+                GroupMessageReaction.message_id.in_(ids)
+            )
+        ).all()
+        reaction_map = build_reaction_map(reaction_rows, current_user.id)
     for m in msgs:
         m.read_by = read_map.get(m.id, [])
+        m.reactions = reaction_map.get(m.id, [])
     return list(reversed(msgs))
 
 
@@ -1246,6 +1324,129 @@ async def group_mark_read(
             db,
         )
     return {"marked": len(to_mark)}
+
+
+def build_reactions_for_message(db: Session, message_id: int, current_user_id: int) -> List[ReactionOut]:
+    rows = db.execute(
+        select(MessageReaction.user_id, MessageReaction.emoji).where(MessageReaction.message_id == message_id)
+    ).all()
+    tmp: Dict[str, ReactionOut] = {}
+    for uid, emoji in rows:
+        if emoji not in tmp:
+            tmp[emoji] = ReactionOut(emoji=emoji, count=0, me=False)
+        tmp[emoji].count += 1
+        if uid == current_user_id:
+            tmp[emoji].me = True
+    return list(tmp.values())
+
+
+def build_reactions_for_group_message(db: Session, message_id: int, current_user_id: int) -> List[ReactionOut]:
+    rows = db.execute(
+        select(GroupMessageReaction.user_id, GroupMessageReaction.emoji).where(GroupMessageReaction.message_id == message_id)
+    ).all()
+    tmp: Dict[str, ReactionOut] = {}
+    for uid, emoji in rows:
+        if emoji not in tmp:
+            tmp[emoji] = ReactionOut(emoji=emoji, count=0, me=False)
+        tmp[emoji].count += 1
+        if uid == current_user_id:
+            tmp[emoji].me = True
+    return list(tmp.values())
+
+
+@app.post("/messages/{message_id}/react", response_model=List[ReactionOut])
+async def react_message(
+    message_id: int,
+    payload: ReactionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    emoji = (payload.emoji or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Emoji required")
+    msg = db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    existing = (
+        db.execute(
+            select(MessageReaction).where(
+                MessageReaction.message_id == message_id, MessageReaction.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if existing and existing.emoji == emoji:
+        db.delete(existing)
+    else:
+        if existing:
+            db.delete(existing)
+        db.add(MessageReaction(message_id=message_id, user_id=current_user.id, emoji=emoji))
+    db.commit()
+
+    reactions = build_reactions_for_message(db, message_id, current_user.id)
+    payload_ws = {
+        "type": "reaction",
+        "message_id": message_id,
+        "reactions": reaction_dict_list(reactions),
+    }
+    await manager.send_to_user(msg.sender_id, payload_ws)
+    if msg.receiver_id != msg.sender_id:
+        await manager.send_to_user(msg.receiver_id, payload_ws)
+    return reactions
+
+
+@app.post("/group_messages/{message_id}/react", response_model=List[ReactionOut])
+async def react_group_message(
+    message_id: int,
+    payload: ReactionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    emoji = (payload.emoji or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Emoji required")
+    msg = db.get(GroupMessage, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Not found")
+    member = (
+        db.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == msg.group_id, GroupMember.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not in group")
+
+    existing = (
+        db.execute(
+            select(GroupMessageReaction).where(
+                GroupMessageReaction.message_id == message_id, GroupMessageReaction.user_id == current_user.id
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if existing and existing.emoji == emoji:
+        db.delete(existing)
+    else:
+        if existing:
+            db.delete(existing)
+        db.add(GroupMessageReaction(message_id=message_id, user_id=current_user.id, emoji=emoji))
+    db.commit()
+
+    reactions = build_reactions_for_group_message(db, message_id, current_user.id)
+    payload_ws = {
+        "type": "group_reaction",
+        "group_id": msg.group_id,
+        "message_id": message_id,
+        "reactions": reaction_dict_list(reactions),
+    }
+    await manager.broadcast(payload_ws)
+    return reactions
 
 
 @app.websocket("/ws")
