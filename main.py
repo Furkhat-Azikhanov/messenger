@@ -173,6 +173,14 @@ class UserOut(BaseModel):
         orm_mode = True
 
 
+class AdminUserOut(UserOut):
+    password_hash: Optional[str] = None
+
+
+class AdminResetPasswordIn(BaseModel):
+    password: str
+
+
 class MessageIn(BaseModel):
     receiver_id: int
     content: str
@@ -823,7 +831,7 @@ async def change_username(
 
 
 # --- Админ API ---
-@app.get("/admin/users", response_model=List[UserOut])
+@app.get("/admin/users", response_model=List[AdminUserOut])
 def admin_list_users(
     _: None = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -831,7 +839,7 @@ def admin_list_users(
     return db.execute(select(User).order_by(User.id)).scalars().all()
 
 
-@app.post("/admin/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@app.post("/admin/users", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
 def admin_create_user(
     payload: RegisterRequest,
     _: None = Depends(require_admin),
@@ -870,6 +878,25 @@ def admin_delete_user(
         db.query(Group).filter(Group.id == gid).delete()
     db.delete(user)
     db.commit()
+
+
+@app.post("/admin/users/{user_id}/reset_password", response_model=AdminUserOut)
+def admin_reset_password(
+    user_id: int,
+    payload: AdminResetPasswordIn,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    new_pwd = (payload.password or "").strip()
+    if len(new_pwd) < 4:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password too short")
+    user.password_hash = hash_password(new_pwd)
+    db.commit()
+    db.refresh(user)
+    return user
     return None
 
 
