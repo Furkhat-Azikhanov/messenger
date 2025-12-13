@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from sqlalchemy import inspect
 from pywebpush import webpush, WebPushException
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -682,7 +682,10 @@ async def verify_email(payload: VerifyEmailIn, db: Session = Depends(get_db)):
 
 @app.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
+    name = (payload.username or "").strip()
+    user = db.execute(
+        select(User).where(or_(User.username == name, User.email == name))
+    ).scalar_one_or_none()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
