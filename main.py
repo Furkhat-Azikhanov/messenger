@@ -57,6 +57,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=True, index=True)
     password_hash = Column(String(128), nullable=False)
     status = Column(String(20), nullable=False, server_default="offline")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -135,6 +136,11 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+class RegisterEmailRequest(BaseModel):
+    email: str
+    username: Optional[str] = None
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -147,6 +153,7 @@ class TokenResponse(BaseModel):
 class UserOut(BaseModel):
     id: int
     username: str
+    email: Optional[str] = None
     status: Optional[str] = "online"
     created_at: datetime
 
@@ -347,6 +354,18 @@ def push_enabled() -> bool:
     return bool(VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY)
 
 
+def smtp_enabled() -> bool:
+    return all(
+        [
+            os.getenv("SMTP_HOST"),
+            os.getenv("SMTP_PORT"),
+            os.getenv("SMTP_USER"),
+            os.getenv("SMTP_PASSWORD"),
+            os.getenv("SMTP_FROM"),
+        ]
+    )
+
+
 async def send_push_to_user(user_id: int, title: str, body: str, db: Session) -> None:
     if not push_enabled():
         return
@@ -410,11 +429,16 @@ def on_startup() -> None:
     if "status" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'offline'")
+    if "email" not in user_cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN email VARCHAR(255)")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
     if "push_subscriptions" not in inspector.get_table_names():
         PushSubscription.__table__.create(bind=engine)
+    if "verify_codes" not in inspector.get_table_names():
+        VerifyCode.__table__.create(bind=engine)
     cols_group = [c["name"] for c in inspector.get_columns("group_messages")]
     if "attachment_url" not in cols_group:
         with engine.connect() as conn:
@@ -531,6 +555,93 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         }
     )
     return user
+
+
+def send_email_code(email: str, code: str) -> None:
+    import smtplib
+    from email.mime.text import MIMEText
+
+    host = os.getenv("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER")
+    password = os.getenv("SMTP_PASSWORD")
+    sender = os.getenv("SMTP_FROM", user)
+
+    msg = MIMEText(f"Ваш код для входа в Messenger: {code}")
+    msg["Subject"] = "Код подтверждения"
+    msg["From"] = sender
+    msg["To"] = email
+
+    with smtplib.SMTP(host, port) as server:
+        server.starttls()
+        server.login(user, password)
+        server.send_message(msg)
+
+
+def generate_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+@app.post("/register_email")
+async def register_email(payload: RegisterEmailRequest, db: Session = Depends(get_db)):
+    if not smtp_enabled():
+        raise HTTPException(status_code=400, detail="SMTP not configured")
+    email = (payload.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email")
+    # создаём код и отправляем
+    code = generate_code()
+    db.add(VerifyCode(email=email, code=code))
+    db.commit()
+    try:
+        await asyncio.to_thread(send_email_code, email, code)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {e}")
+    return {"sent": True}
+
+
+class VerifyEmailIn(BaseModel):
+    email: str
+    code: str
+    username: Optional[str] = None
+
+
+@app.post("/verify_email", response_model=TokenResponse)
+async def verify_email(payload: VerifyEmailIn, db: Session = Depends(get_db)):
+    email = (payload.email or "").strip().lower()
+    code = (payload.code or "").strip()
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Email and code required")
+    rec = (
+        db.execute(
+            select(VerifyCode)
+            .where(VerifyCode.email == email, VerifyCode.code == code, VerifyCode.used_at.is_(None))
+            .order_by(VerifyCode.id.desc())
+        )
+        .scalar_one_or_none()
+    )
+    if not rec:
+        raise HTTPException(status_code=400, detail="Invalid code")
+    # отмечаем использованным
+    rec.used_at = datetime.utcnow()
+    # ищем пользователя
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if not user:
+        username = payload.username.strip() if payload.username else email.split("@")[0]
+        # гарантируем уникальность имени
+        base = username
+        i = 1
+        while db.execute(select(User).where(User.username == username)).scalar_one_or_none():
+            username = f"{base}{i}"
+            i += 1
+        user = User(username=username, email=email, password_hash=hash_password(secrets.token_urlsafe(12)))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        db.commit()
+    token = create_token(user.id)
+    return TokenResponse(token=token)
 
 
 @app.post("/login", response_model=TokenResponse)
@@ -1233,3 +1344,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(manager.broadcast({"type": "user_offline", "user_id": user.id}))
     finally:
         db.close()
+class VerifyCode(Base):
+    __tablename__ = "verify_codes"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), index=True, nullable=False)
+    code = Column(String(10), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    used_at = Column(DateTime(timezone=True), nullable=True)
