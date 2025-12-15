@@ -1033,7 +1033,7 @@
       <button id="nav-stories" title="Актуальное">⭐️</button>
       <button id="nav-settings" title="Настройки">⚙️</button>
     </div>
-    <div id="settings-panel" class="settings-panel hidden">
+  <div id="settings-panel" class="settings-panel hidden">
       <div class="settings-profile">
         <div class="settings-avatar-preview" id="settings-avatar-wrap">
           <img id="settings-avatar" alt="avatar" />
@@ -1060,6 +1060,71 @@
       <div class="push-status" id="push-status">Уведомления: неизвестно</div>
       <div class="settings-row" style="margin-top:6px;">
         <button id="btn-request-push" class="secondary">Разрешить уведомления</button>
+      </div>
+      <div class="section-title">Конфиденциальность</div>
+      <div class="settings-row column" style="gap:6px;">
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Профиль видят
+          <select id="privacy-profile" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">О себе видят
+          <select id="privacy-about" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Статус/онлайн
+          <select id="privacy-status" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Последнее появление
+          <select id="privacy-lastseen" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="privacy-read" checked /> Отметки о прочтении
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="privacy-typing" checked /> Показывать «печатает»
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Кто может звонить
+          <select id="privacy-calls" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Добавление в группы
+          <select id="privacy-groups" class="profile-input" style="margin-top:4px;">
+            <option value="public">Все</option>
+            <option value="contacts">Только контакты</option>
+            <option value="none">Никто</option>
+          </select>
+        </label>
+        <label style="color:#e9edef; font-size:13px; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="privacy-voice" /> Скрыть «прослушал голосовое»
+        </label>
+        <div style="width:100%; color:#e9edef; font-size:13px;">
+          Блок-лист
+          <div id="blocked-list" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <input id="blocked-input" class="profile-input" style="flex:1;" placeholder="Имя пользователя" />
+            <button id="blocked-add" class="secondary">Добавить</button>
+          </div>
+        </div>
+        <div class="settings-row" style="margin-top:6px;">
+          <button id="privacy-save" class="secondary">Сохранить конфиденциальность</button>
+        </div>
       </div>
       <div class="settings-row" style="margin-top:10px;">
         <button id="settings-logout" class="danger">⏻ Выйти</button>
@@ -1145,6 +1210,19 @@
     const settingsAvatar = document.getElementById('settings-avatar');
     const settingsAvatarWrap = document.getElementById('settings-avatar-wrap');
     const aboutInput = document.getElementById('about-input');
+    const privacyProfile = document.getElementById('privacy-profile');
+    const privacyAbout = document.getElementById('privacy-about');
+    const privacyStatus = document.getElementById('privacy-status');
+    const privacyLast = document.getElementById('privacy-lastseen');
+    const privacyRead = document.getElementById('privacy-read');
+    const privacyTyping = document.getElementById('privacy-typing');
+    const privacyCalls = document.getElementById('privacy-calls');
+    const privacyGroups = document.getElementById('privacy-groups');
+    const privacyVoice = document.getElementById('privacy-voice');
+    const blockedList = document.getElementById('blocked-list');
+    const blockedInput = document.getElementById('blocked-input');
+    const blockedAdd = document.getElementById('blocked-add');
+    const privacySave = document.getElementById('privacy-save');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
     if (chatEl) chatEl.addEventListener('scroll', () => { closeReactionPicker(); hideMobileMenu(); });
@@ -1729,6 +1807,7 @@
         if (aboutInput) aboutInput.value = me?.about || '';
         renderSettingsAvatar();
         updatePushStatus();
+        loadPrivacy();
       }
     }
     function hideSettings() {
@@ -1771,6 +1850,80 @@
       } catch (e) {
         setChatStatus('Не удалось сохранить \"О себе\": ' + e.message);
         aboutInput.value = me.about || '';
+      }
+    }
+    function renderBlocked(list = []) {
+      if (!blockedList) return;
+      blockedList.innerHTML = '';
+      if (!list.length) {
+        blockedList.textContent = 'Пусто';
+        return;
+      }
+      list.forEach(item => {
+        const pill = document.createElement('span');
+        pill.style.padding = '4px 8px';
+        pill.style.borderRadius = '12px';
+        pill.style.background = '#2a3942';
+        pill.style.border = '1px solid #2f3b43';
+        pill.style.color = '#e9edef';
+        pill.style.display = 'inline-flex';
+        pill.style.alignItems = 'center';
+        pill.style.gap = '6px';
+        pill.textContent = item.username;
+        pill.dataset.name = item.username;
+        const x = document.createElement('button');
+        x.textContent = '×';
+        x.style.background = 'transparent';
+        x.style.color = '#e9edef';
+        x.style.border = 'none';
+        x.style.cursor = 'pointer';
+        x.onclick = () => {
+          const filtered = list.filter(u => u.username !== item.username);
+          renderBlocked(filtered);
+          blockedInput.value = '';
+          savePrivacy(filtered.map(u => u.username), false);
+        };
+        pill.appendChild(x);
+        blockedList.appendChild(pill);
+      });
+    }
+    async function loadPrivacy() {
+      try {
+        const res = await api('/privacy');
+        const s = res.settings || {};
+        if (privacyProfile) privacyProfile.value = s.profile_visibility || 'public';
+        if (privacyAbout) privacyAbout.value = s.about_visibility || 'public';
+        if (privacyStatus) privacyStatus.value = s.status_visibility || 'public';
+        if (privacyLast) privacyLast.value = s.last_seen_visibility || 'public';
+        if (privacyCalls) privacyCalls.value = s.calls || 'public';
+        if (privacyGroups) privacyGroups.value = s.groups || 'public';
+        if (privacyRead) privacyRead.checked = s.read_receipts !== false;
+        if (privacyTyping) privacyTyping.checked = s.typing_visible !== false;
+        if (privacyVoice) privacyVoice.checked = !!s.hide_voice_read;
+        renderBlocked(res.blocked || []);
+      } catch (e) {
+        setChatStatus('Не удалось загрузить конфиденциальность: ' + e.message);
+      }
+    }
+    async function savePrivacy(blockedFromList = null, withNotify = true) {
+      try {
+        const payload = {
+          profile_visibility: privacyProfile?.value || 'public',
+          about_visibility: privacyAbout?.value || 'public',
+          status_visibility: privacyStatus?.value || 'public',
+          last_seen_visibility: privacyLast?.value || 'public',
+          calls: privacyCalls?.value || 'public',
+          groups: privacyGroups?.value || 'public',
+          read_receipts: privacyRead?.checked ?? true,
+          typing_visible: privacyTyping?.checked ?? true,
+          hide_voice_read: privacyVoice?.checked ?? false,
+          blocked_usernames: blockedFromList !== null ? blockedFromList : Array.from(blockedList?.children || []).map(c => c.dataset?.name).filter(Boolean),
+        };
+        const res = await api('/privacy', { method: 'POST', body: JSON.stringify(payload) });
+        renderBlocked(res.blocked || []);
+        if (withNotify) setChatStatus('Конфиденциальность обновлена');
+      } catch (e) {
+        setChatStatus('Не удалось сохранить конфиденциальность: ' + e.message);
       }
     }
     function showAuth() {
@@ -3144,6 +3297,19 @@
       });
       aboutInput.addEventListener('blur', changeAbout);
     }
+    if (blockedAdd) blockedAdd.onclick = () => {
+      const name = blockedInput?.value.trim();
+      if (!name) return;
+      const existing = Array.from(blockedList?.children || []).some(c => c.dataset?.name === name);
+      if (!existing) {
+        const current = Array.from(blockedList?.children || []).map(c => ({ username: c.dataset?.name }));
+        current.push({ username: name });
+        renderBlocked(current);
+      }
+      blockedInput.value = '';
+      savePrivacy(Array.from(blockedList?.children || []).map(c => c.dataset?.name).filter(Boolean), false);
+    };
+    if (privacySave) privacySave.onclick = () => savePrivacy();
     function setActiveNav(btn) {
       document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');

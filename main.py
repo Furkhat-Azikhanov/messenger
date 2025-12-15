@@ -65,6 +65,7 @@ class User(Base):
     status = Column(String(20), nullable=False, server_default="offline")
     avatar_url = Column(Text, nullable=True)
     about = Column(Text, nullable=True)
+    privacy = Column(Text, nullable=True)  # JSON with privacy settings
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -209,6 +210,24 @@ class AdminResetPasswordIn(BaseModel):
 
 class AboutIn(BaseModel):
     about: str
+
+
+class PrivacyIn(BaseModel):
+    profile_visibility: str = "public"       # public | contacts | none
+    about_visibility: str = "public"
+    status_visibility: str = "public"
+    last_seen_visibility: str = "public"
+    read_receipts: bool = True
+    typing_visible: bool = True
+    calls: str = "public"                    # public | contacts | none
+    groups: str = "public"                   # public | contacts | none
+    hide_voice_read: bool = False
+    blocked_usernames: List[str] = []
+
+
+class PrivacyOut(BaseModel):
+    settings: dict
+    blocked: List[Dict[str, str]]
 
 
 class ReactionIn(BaseModel):
@@ -517,6 +536,9 @@ def on_startup() -> None:
     if "avatar_url" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+    if "privacy" not in user_cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN privacy TEXT")
     if "about" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN about TEXT")
@@ -623,6 +645,21 @@ def push_unsubscribe(
     ).delete()
     db.commit()
     return {"status": "removed"}
+
+
+def default_privacy_dict() -> dict:
+    return {
+        "profile_visibility": "public",
+        "about_visibility": "public",
+        "status_visibility": "public",
+        "last_seen_visibility": "public",
+        "read_receipts": True,
+        "typing_visible": True,
+        "calls": "public",
+        "groups": "public",
+        "hide_voice_read": False,
+        "blocked": [],
+    }
 
 
 @app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -858,6 +895,65 @@ async def set_about(
     db.commit()
     await manager.broadcast({"type": "user_about", "user_id": current_user.id, "about": about})
     return {"about": about}
+
+
+@app.get("/privacy", response_model=PrivacyOut)
+def get_privacy(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    settings = default_privacy_dict()
+    if current_user.privacy:
+        try:
+            settings.update(json.loads(current_user.privacy))
+        except Exception:
+            pass
+    blocked_ids = settings.get("blocked", [])
+    blocked_users = []
+    if blocked_ids:
+        rows = db.execute(select(User.id, User.username).where(User.id.in_(blocked_ids))).all()
+        for uid, uname in rows:
+            blocked_users.append({"id": str(uid), "username": uname})
+    return {"settings": settings, "blocked": blocked_users}
+
+
+@app.post("/privacy", response_model=PrivacyOut)
+def set_privacy(
+    payload: PrivacyIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    settings = default_privacy_dict()
+    # validate enums
+    def norm(val: str) -> str:
+        val = (val or "").strip().lower()
+        return val if val in {"public", "contacts", "none"} else "public"
+
+    settings["profile_visibility"] = norm(payload.profile_visibility)
+    settings["about_visibility"] = norm(payload.about_visibility)
+    settings["status_visibility"] = norm(payload.status_visibility)
+    settings["last_seen_visibility"] = norm(payload.last_seen_visibility)
+    settings["read_receipts"] = bool(payload.read_receipts)
+    settings["typing_visible"] = bool(payload.typing_visible)
+    settings["calls"] = norm(payload.calls)
+    settings["groups"] = norm(payload.groups)
+    settings["hide_voice_read"] = bool(payload.hide_voice_read)
+
+    # blocked usernames -> ids
+    blocked_ids: List[int] = []
+    if payload.blocked_usernames:
+        names = [n.strip() for n in payload.blocked_usernames if n.strip()]
+        if names:
+            rows = db.execute(select(User.id, User.username).where(User.username.in_(names))).all()
+            blocked_ids = [r.id for r in rows]
+    settings["blocked"] = blocked_ids
+
+    current_user.privacy = json.dumps(settings)
+    db.commit()
+    # return populated blocked list
+    blocked_users = []
+    if blocked_ids:
+        rows = db.execute(select(User.id, User.username).where(User.id.in_(blocked_ids))).all()
+        for uid, uname in rows:
+            blocked_users.append({"id": str(uid), "username": uname})
+    return {"settings": settings, "blocked": blocked_users}
 
 
 @app.post("/calls", response_model=CallLogOut)
