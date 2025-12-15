@@ -63,6 +63,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=True, index=True)
     password_hash = Column(String(128), nullable=False)
     status = Column(String(20), nullable=False, server_default="offline")
+    avatar_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -189,6 +190,7 @@ class UserOut(BaseModel):
     username: str
     email: Optional[str] = None
     status: Optional[str] = "online"
+    avatar_url: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -506,6 +508,9 @@ def on_startup() -> None:
     if "email" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN email VARCHAR(255)")
+    if "avatar_url" not in user_cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar_url TEXT")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
@@ -629,6 +634,7 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
                 "id": user.id,
                 "username": user.username,
                 "status": user.status,
+                "avatar_url": user.avatar_url,
                 "created_at": user.created_at.isoformat(),
             },
         }
@@ -759,6 +765,28 @@ async def upload_file(
         "name": filename,
         "size": os.path.getsize(dest_path),
     }
+
+
+@app.post("/profile/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Image required")
+    upload_dir = os.path.join(UPLOAD_DIR, "avatars")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "avatar")[1]
+    safe_name = f"avatar_{current_user.id}_{int(time.time()*1000)}{ext}"
+    dest_path = os.path.join(upload_dir, safe_name)
+    with open(dest_path, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    url = f"/uploads/avatars/{safe_name}"
+    current_user.avatar_url = url
+    db.commit()
+    await manager.broadcast({"type": "user_avatar", "user_id": current_user.id, "avatar_url": url})
+    return {"url": url}
 
 
 @app.get("/me", response_model=UserOut)
