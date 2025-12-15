@@ -24,7 +24,9 @@
     body {
       margin: 0;
       font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at 20% 20%, rgba(37,211,102,0.05), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(37,211,102,0.04), transparent 30%),
+                  var(--bg);
       color: var(--text);
       overflow-x: hidden;
     }
@@ -134,6 +136,7 @@
       flex-direction: column;
       height: calc(100vh - 54px);
       min-height: calc(100dvh - 54px);
+      box-shadow: inset 0 8px 22px rgba(0,0,0,0.25);
     }
     .chat-header {
       background: var(--panel-2);
@@ -142,6 +145,7 @@
       align-items: center;
       padding: 0 18px;
       justify-content: space-between;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.25);
     }
     .chat-meta { display: flex; flex-direction: column; }
     .chat-meta .name { font-weight: 600; }
@@ -157,12 +161,12 @@
       padding: 16px 22px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
       background:
-        radial-gradient(circle at 20% 20%, rgba(255,255,255,0.02), transparent 25%),
-        radial-gradient(circle at 80% 0%, rgba(255,255,255,0.025), transparent 30%),
-        linear-gradient(135deg, rgba(255,255,255,0.01) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.01) 50%, rgba(255,255,255,0.01) 75%, transparent 75%, transparent);
-      background-size: 280px 280px, 260px 260px, 18px 18px;
+        radial-gradient(circle at 20% 20%, rgba(255,255,255,0.03), transparent 26%),
+        radial-gradient(circle at 80% 0%, rgba(255,255,255,0.02), transparent 30%),
+        linear-gradient(135deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.015) 50%, rgba(255,255,255,0.015) 75%, transparent 75%, transparent);
+      background-size: 320px 320px, 280px 280px, 18px 18px;
       background-color: #0d141a;
     }
     .group-info {
@@ -276,24 +280,31 @@
     .call-card.missed .call-icon { color: #ff6b6b; }
     .call-card.missed .call-title { color: #ff6b6b; }
     .msg {
-      max-width: 70%;
-      padding: 10px 12px;
-      border-radius: 10px;
+      max-width: 78%;
+      padding: 12px 14px;
+      border-radius: 16px;
       position: relative;
       color: #111;
-      line-height: 1.3;
-      position: relative;
+      line-height: 1.4;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
+    .msg-new { animation: pop-in 0.18s ease; }
+    @keyframes pop-in {
+      from { transform: translateY(6px) scale(0.99); opacity: 0.7; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .msg:hover { box-shadow: 0 10px 24px rgba(0,0,0,0.24); }
     .me {
       margin-left: auto;
       background: linear-gradient(135deg, #d9fdd3, #b2f5a5);
-      border-top-right-radius: 2px;
+      border-top-right-radius: 4px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     .other {
       margin-right: auto;
       background: linear-gradient(135deg, #ffffff, #e7eef5);
-      border-top-left-radius: 2px;
+      border-top-left-radius: 4px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     .bubble-info {
@@ -603,6 +614,57 @@
       color: var(--text);
       border: none;
       padding: 0 4px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    /* Refined input bar */
+    .chat-input {
+      background: linear-gradient(180deg, #1c2730 0%, #101820 100%);
+      border-top: 1px solid #1f2c33;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      flex-wrap: wrap;
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      box-shadow: 0 -6px 14px rgba(0,0,0,0.25);
+    }
+    .chat-input input {
+      background: #1a242d;
+      border: 1px solid #2f3b43;
+      color: var(--text);
+      flex: 1 1 auto;
+      min-width: 0;
+      border-radius: 14px;
+      padding: 12px 14px;
+    }
+    .chat-input button { background: var(--accent); color: #111; font-weight: 700; border-radius: 14px; }
+    .mic-btn {
+      background: #2a3942;
+      color: var(--text);
+      font-size: 18px;
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid #2f3b43;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .attach-label {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      color: var(--text);
       cursor: pointer;
       font-weight: 700;
     }
