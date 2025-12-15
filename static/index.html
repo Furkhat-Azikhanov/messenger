@@ -3126,6 +3126,10 @@
       });
       settingsUsernameInput.addEventListener('blur', changeUsername);
     }
+    if (settingsAvatarWrap) {
+      settingsAvatarWrap.style.cursor = 'pointer';
+      settingsAvatarWrap.onclick = () => document.getElementById('avatar-input')?.click();
+    }
     if (aboutInput) {
       aboutInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
