@@ -1124,6 +1124,7 @@
       if (!reactionPicker.contains(e.target)) closeReactionPicker();
     }, { passive: true });
     function attachSwipeToReply(el, msg, isGroup = false, groupId = null) {
+      if (isMobile) return;
       let startX = 0;
       let moved = false;
       el.addEventListener('touchstart', (e) => {
