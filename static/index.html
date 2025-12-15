@@ -819,6 +819,49 @@
       z-index: 6;
       box-shadow: 0 8px 30px rgba(0,0,0,0.4);
     }
+    .settings-profile {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .settings-avatar-preview {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      overflow: hidden;
+      background: #2a3942;
+      border: 1px solid #2f3b43;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #e9edef;
+      flex-shrink: 0;
+    }
+    .settings-avatar-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .settings-profile-fields {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .settings-panel input.profile-input,
+    .settings-panel textarea.profile-input {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #2f3b43;
+      background:#111b21;
+      color:#e9edef;
+      resize: none;
+    }
+    .settings-panel textarea.profile-input { min-height: 48px; }
     .settings-panel h3 { margin: 0 0 8px; font-size: 15px; }
     .settings-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .settings-row button {
@@ -989,7 +1032,15 @@
       <button id="nav-settings" title="Настройки">⚙️</button>
     </div>
     <div id="settings-panel" class="settings-panel hidden">
-      <h3><input id="settings-username" placeholder="Имя аккаунта" style="width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #2f3b43; background:#111b21; color:#e9edef;" /></h3>
+      <div class="settings-profile">
+        <div class="settings-avatar-preview" id="settings-avatar-wrap">
+          <img id="settings-avatar" alt="avatar" />
+        </div>
+        <div class="settings-profile-fields">
+          <input id="settings-username" class="profile-input" placeholder="Имя аккаунта" />
+          <textarea id="about-input" class="profile-input" placeholder="О себе"></textarea>
+        </div>
+      </div>
       <div class="settings-row" style="margin-bottom:6px;">
         <button id="btn-avatar" class="secondary">🖼️ Изменить аватар</button>
         <input type="file" accept="image/*" id="avatar-input" style="display:none;" />
@@ -1086,6 +1137,9 @@
     let mobileTarget = null; // {msg,isGroup,groupId}
     let reactionTarget = null; // {msg, isGroup, groupId}
     const settingsUsernameInput = document.getElementById('settings-username');
+    const settingsAvatar = document.getElementById('settings-avatar');
+    const settingsAvatarWrap = document.getElementById('settings-avatar-wrap');
+    const aboutInput = document.getElementById('about-input');
     const pushStatus = document.getElementById('push-status');
     const btnRequestPush = document.getElementById('btn-request-push');
     if (chatEl) chatEl.addEventListener('scroll', () => { closeReactionPicker(); hideMobileMenu(); });
@@ -1647,10 +1701,28 @@
       currentReply = null;
       if (replyBar) replyBar.classList.add('hidden');
     }
+    function settingsAvatarInitial() {
+      if (me?.username) return (me.username[0] || '🙂').toUpperCase();
+      return '🙂';
+    }
+    function renderSettingsAvatar() {
+      if (!settingsAvatarWrap) return;
+      const url = me?.avatar_url;
+      if (url && settingsAvatar) {
+        settingsAvatar.src = url;
+        settingsAvatar.style.display = 'block';
+        settingsAvatarWrap.textContent = '';
+      } else {
+        if (settingsAvatar) settingsAvatar.src = '';
+        settingsAvatarWrap.textContent = settingsAvatarInitial();
+      }
+    }
     function showSettings() {
       if (settingsPanel) {
         settingsPanel.classList.remove('hidden');
         if (settingsUsernameInput && me) settingsUsernameInput.value = me.username || '';
+        if (aboutInput) aboutInput.value = me?.about || '';
+        renderSettingsAvatar();
         updatePushStatus();
       }
     }
@@ -1681,6 +1753,19 @@
       } catch (e) {
         setChatStatus('Не удалось сменить имя: ' + e.message);
         settingsUsernameInput.value = me.username || '';
+      }
+    }
+    async function changeAbout() {
+      if (!aboutInput || !me) return;
+      let about = aboutInput.value || '';
+      if (about.length > 280) about = about.slice(0, 280);
+      try {
+        await api('/profile/about', { method: 'POST', body: JSON.stringify({ about }) });
+        me.about = about;
+        setChatStatus('Профиль обновлён');
+      } catch (e) {
+        setChatStatus('Не удалось сохранить \"О себе\": ' + e.message);
+        aboutInput.value = me.about || '';
       }
     }
     function showAuth() {
@@ -2719,6 +2804,10 @@
             if (u) u.username = data.username;
             if (me && me.id === data.user_id) me.username = data.username;
             renderUsers(usersCache);
+          } else if (data.type === 'user_about') {
+            const u = usersCache.find(x => x.id === data.user_id);
+            if (u) u.about = data.about || '';
+            if (me && me.id === data.user_id) me.about = data.about || '';
           } else if (data.type === 'typing') {
             const name = usernameById(data.sender_id);
             if (data.is_typing) {
@@ -3036,6 +3125,15 @@
         }
       });
       settingsUsernameInput.addEventListener('blur', changeUsername);
+    }
+    if (aboutInput) {
+      aboutInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          await changeAbout();
+        }
+      });
+      aboutInput.addEventListener('blur', changeAbout);
     }
     function setActiveNav(btn) {
       document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.remove('active'));

@@ -64,6 +64,7 @@ class User(Base):
     password_hash = Column(String(128), nullable=False)
     status = Column(String(20), nullable=False, server_default="offline")
     avatar_url = Column(Text, nullable=True)
+    about = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -191,6 +192,7 @@ class UserOut(BaseModel):
     email: Optional[str] = None
     status: Optional[str] = "online"
     avatar_url: Optional[str] = None
+    about: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -203,6 +205,10 @@ class AdminUserOut(UserOut):
 
 class AdminResetPasswordIn(BaseModel):
     password: str
+
+
+class AboutIn(BaseModel):
+    about: str
 
 
 class ReactionIn(BaseModel):
@@ -511,6 +517,9 @@ def on_startup() -> None:
     if "avatar_url" not in user_cols:
         with engine.connect() as conn:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+    if "about" not in user_cols:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN about TEXT")
     # Создаем таблицу group_message_reads, если отсутствует
     if "group_message_reads" not in inspector.get_table_names():
         GroupMessageRead.__table__.create(bind=engine)
@@ -635,6 +644,7 @@ async def register(payload: RegisterRequest, db: Session = Depends(get_db)):
                 "username": user.username,
                 "status": user.status,
                 "avatar_url": user.avatar_url,
+                "about": user.about,
                 "created_at": user.created_at.isoformat(),
             },
         }
@@ -833,6 +843,21 @@ async def set_status(
     db.commit()
     await manager.broadcast({"type": "status", "user_id": current_user.id, "status": value})
     return {"status": value}
+
+
+@app.post("/profile/about")
+async def set_about(
+    payload: AboutIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    about = (payload.about or "").strip()
+    if len(about) > 280:
+        about = about[:280]
+    current_user.about = about
+    db.commit()
+    await manager.broadcast({"type": "user_about", "user_id": current_user.id, "about": about})
+    return {"about": about}
 
 
 @app.post("/calls", response_model=CallLogOut)
