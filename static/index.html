@@ -1064,7 +1064,12 @@
         <button id="btn-request-push" class="secondary">Разрешить уведомления</button>
       </div>
       <div class="section-title">Конфиденциальность</div>
-      <div class="settings-row column" style="gap:6px;">
+      <div class="settings-row" style="margin-bottom:6px;">
+        <button id="privacy-toggle" class="secondary" style="width:100%; display:flex; justify-content:space-between; align-items:center;">
+          <span>Конфиденциальность</span><span id="privacy-caret">▾</span>
+        </button>
+      </div>
+      <div id="privacy-section" class="settings-row column" style="gap:6px;">
         <label style="color:#e9edef; font-size:13px; display:block; width:100%;">Профиль видят
           <select id="privacy-profile" class="profile-input" style="margin-top:4px;">
             <option value="public">Все</option>
@@ -1798,7 +1803,10 @@
         settingsAvatar.style.display = 'block';
         settingsAvatarWrap.textContent = '';
       } else {
-        if (settingsAvatar) settingsAvatar.src = '';
+        if (settingsAvatar) {
+          settingsAvatar.src = '';
+          settingsAvatar.style.display = 'none';
+        }
         settingsAvatarWrap.textContent = settingsAvatarInitial();
       }
     }
@@ -3289,6 +3297,15 @@
     if (settingsAvatarWrap) {
       settingsAvatarWrap.style.cursor = 'pointer';
       settingsAvatarWrap.onclick = () => document.getElementById('avatar-input')?.click();
+    }
+    const privacySection = document.getElementById('privacy-section');
+    const privacyToggle = document.getElementById('privacy-toggle');
+    const privacyCaret = document.getElementById('privacy-caret');
+    if (privacyToggle && privacySection) {
+      privacyToggle.onclick = () => {
+        const hidden = privacySection.classList.toggle('hidden');
+        if (privacyCaret) privacyCaret.textContent = hidden ? '▸' : '▾';
+      };
     }
     if (aboutInput) {
       aboutInput.addEventListener('keydown', async (e) => {
