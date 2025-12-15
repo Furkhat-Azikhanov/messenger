@@ -1377,6 +1377,7 @@
           // нижние варианты хуже поддерживаются Safari, оставляем как запасные
           'audio/webm;codecs=opus',
           'audio/ogg;codecs=opus',
+          'audio/webm',
         ];
         const chosenMime = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
         recorder = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
@@ -1386,13 +1387,17 @@
           if (e.data.size > 0) recorderChunks.push(e.data);
         };
         recorder.onstop = () => {
-          const mime = recorder._chosenMime || 'audio/mp4';
-          const blob = new Blob(recorderChunks, { type: mime });
+          const guessed = recorder._chosenMime || recorder.mimeType || (recorderChunks[0]?.type) || 'audio/webm';
+          const blob = new Blob(recorderChunks, { type: guessed });
           recorder.stream.getTracks().forEach(t => t.stop());
           recorder = null;
           if (blob.size === 0) return;
           const dur = ((Date.now() - recordStart) / 1000).toFixed(1);
-          const ext = mime.includes('mp4') || mime.includes('aac') ? 'm4a' : mime.includes('mpeg') ? 'mp3' : mime.includes('ogg') ? 'ogg' : 'webm';
+          const mime = guessed.toLowerCase();
+          const ext = mime.includes('mp4') || mime.includes('aac') ? 'm4a'
+            : mime.includes('mpeg') ? 'mp3'
+            : mime.includes('ogg') ? 'ogg'
+            : 'webm';
           pendingVoiceFile = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
           if (fileChip) {
             fileChip.textContent = `Голосовое: ${dur} c`;
