@@ -299,13 +299,25 @@
       margin-left: auto;
       background: linear-gradient(135deg, #d9fdd3, #b2f5a5);
       border-top-right-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 6px 22px rgba(0,0,0,0.25);
     }
     .other {
       margin-right: auto;
       background: linear-gradient(135deg, #ffffff, #e7eef5);
       border-top-left-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+    }
+    .msg.pending {
+      opacity: 0.8;
+    }
+    .msg.pending::after {
+      content: "Отправляется…";
+      display: block;
+      font-size: 11px;
+      color: #fff;
+      margin-top: 4px;
+      text-align: right;
+      opacity: 0.8;
     }
     .bubble-info {
       font-size: 11px;
@@ -1065,6 +1077,28 @@
     let recordStart = 0;
     let currentReply = null; // {id, isGroup}
     let pendingOffer = null;
+    function currentChatKey() {
+      if (currentGroup) return `g:${currentGroup}`;
+      if (currentPeer) return `${currentPeer}`;
+      return null;
+    }
+    function addDraftMessage(key, msg) {
+      if (!key) return;
+      conversations[key] = conversations[key] || [];
+      conversations[key].push(msg);
+    }
+    function consumeDraft(key) {
+      const list = conversations[key];
+      if (!list || !list.length) return;
+      const idx = list.findIndex(m => m && m.pending);
+      if (idx >= 0) {
+        const draft = list[idx];
+        if (draft.attachment_url && draft.attachment_url.startsWith('blob:')) {
+          URL.revokeObjectURL(draft.attachment_url);
+        }
+        list.splice(idx, 1);
+      }
+    }
     let callsCache = [];
     const chatInputWrap = document.querySelector('.chat-input');
     const bottomNav = document.getElementById('bottom-nav');
@@ -1387,6 +1421,40 @@
         outputArray[i] = rawData.charCodeAt(i);
       }
       return outputArray;
+    }
+
+    async function maybeCompressImage(file) {
+      if (!file || !file.type?.startsWith('image/')) return file;
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = reader.result;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const maxSide = 1600;
+        let { width, height } = img;
+        const scale = Math.min(1, maxSide / Math.max(width, height));
+        if (scale < 1) {
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+        if (!blob) return file;
+        return new File([blob], file.name.replace(/\.(png|jpg|jpeg|webp)$/i, '.jpg'), { type: 'image/jpeg' });
+      } catch (_) {
+        return file;
+      }
     }
     async function ensurePushSubscribed() {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -2080,6 +2148,7 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        if (m.pending) wrap.classList.add('pending');
         wrap.dataset.mid = m.id;
         if (!isMobile) {
           wrap.onclick = () => setReply(m, false, null);
@@ -2146,6 +2215,7 @@
         const wrap = document.createElement('div');
         const isMe = m.sender_id === me.id;
         wrap.className = `msg ${isMe ? 'me' : 'other'}`;
+        if (m.pending) wrap.classList.add('pending');
         wrap.dataset.mid = m.id;
         if (!isMobile) {
           wrap.onclick = () => setReply(m, true, groupId);
@@ -2359,6 +2429,9 @@
       const peerId = msg.sender_id === me.id ? msg.receiver_id : msg.sender_id;
       conversations[peerId] = conversations[peerId] || [];
       conversations[peerId].push(msg);
+      if (msg.sender_id === me.id) {
+        consumeDraft(`${peerId}`);
+      }
       // если это закреплённое событие придёт отдельно
       if (peerId === currentPeer) {
         renderMessages(peerId);
@@ -2380,6 +2453,9 @@
       const key = `g:${msg.group_id}`;
       conversations[key] = conversations[key] || [];
       conversations[key].push(msg);
+      if (msg.sender_id === me.id) {
+        consumeDraft(key);
+      }
       if (currentGroup === msg.group_id) {
         renderGroupMessages(msg.group_id);
         markGroupRead(msg.group_id);
@@ -2610,8 +2686,30 @@
 
     async function sendMessage() {
       if (!currentPeer && !currentGroup) return setChatStatus('Выберите собеседника или группу');
-      const file = pendingVoiceFile || fileInputEl?.files?.[0];
+      const originalFile = pendingVoiceFile || fileInputEl?.files?.[0];
+      const file = originalFile ? await maybeCompressImage(originalFile) : null;
       const content = messageInput.value.trim();
+      if (!content && !file) {
+        setChatStatus('Введите текст или выберите файл');
+        return;
+      }
+      const key = currentGroup ? `g:${currentGroup}` : `${currentPeer}`;
+      const draftId = `draft-${Date.now()}`;
+      const draft = {
+        id: draftId,
+        sender_id: me?.id,
+        receiver_id: currentPeer,
+        group_id: currentGroup,
+        content,
+        attachment_url: file && file.type?.startsWith('image/') ? URL.createObjectURL(file) : null,
+        attachment_type: file?.type,
+        attachment_name: file?.name,
+        reply_to_id: currentReply?.id || null,
+        created_at: new Date().toISOString(),
+        pending: true,
+      };
+      addDraftMessage(key, draft);
+      if (currentGroup) renderGroupMessages(currentGroup); else if (currentPeer) renderMessages(currentPeer);
       let uploadMeta = null;
       try {
         if (file) {
@@ -2625,6 +2723,8 @@
           if (!res.ok) {
             const msg = await res.text();
             setChatStatus('Не удалось загрузить файл: ' + msg);
+            consumeDraft(key);
+            if (currentGroup) renderGroupMessages(currentGroup); else if (currentPeer) renderMessages(currentPeer);
             return;
           }
           uploadMeta = await res.json();
@@ -2633,10 +2733,8 @@
         }
       } catch (e) {
         setChatStatus('Ошибка загрузки файла: ' + e.message);
-        return;
-      }
-      if (!content && !uploadMeta) {
-        setChatStatus('Введите текст или выберите файл');
+        consumeDraft(key);
+        if (currentGroup) renderGroupMessages(currentGroup); else if (currentPeer) renderMessages(currentPeer);
         return;
       }
       const payloadBase = {
