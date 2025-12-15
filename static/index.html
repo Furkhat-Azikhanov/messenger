@@ -1370,18 +1370,28 @@
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         recorderChunks = [];
-        recorder = new MediaRecorder(stream);
+        const mimeCandidates = [
+          'audio/mp4',
+          'audio/mpeg',
+          'audio/ogg;codecs=opus',
+          'audio/webm;codecs=opus',
+        ];
+        const chosenMime = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+        recorder = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
+        recorder._chosenMime = chosenMime;
         recordStart = Date.now();
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) recorderChunks.push(e.data);
         };
         recorder.onstop = () => {
-          const blob = new Blob(recorderChunks, { type: 'audio/webm' });
+          const mime = recorder._chosenMime || 'audio/webm';
+          const blob = new Blob(recorderChunks, { type: mime });
           recorder.stream.getTracks().forEach(t => t.stop());
           recorder = null;
           if (blob.size === 0) return;
           const dur = ((Date.now() - recordStart) / 1000).toFixed(1);
-          pendingVoiceFile = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+          const ext = mime.includes('mp4') || mime.includes('mpeg') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+          pendingVoiceFile = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
           if (fileChip) {
             fileChip.textContent = `Голосовое: ${dur} c`;
             const clearBtn = document.createElement('button');
@@ -1943,7 +1953,7 @@
         img.src = m.attachment_url;
         img.alt = name;
         wrap.appendChild(img);
-      } else if (type.startsWith('audio') || name.toLowerCase().endsWith('.webm') || name.toLowerCase().endsWith('.mp3') || name.toLowerCase().endsWith('.m4a')) {
+      } else if (type.startsWith('audio') || name.toLowerCase().endsWith('.webm') || name.toLowerCase().endsWith('.mp3') || name.toLowerCase().endsWith('.m4a') || name.toLowerCase().endsWith('.ogg')) {
         const aud = document.createElement('audio');
         aud.controls = true;
         aud.src = m.attachment_url;
