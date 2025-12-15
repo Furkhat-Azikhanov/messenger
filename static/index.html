@@ -862,6 +862,8 @@
       resize: none;
     }
     .settings-panel textarea.profile-input { min-height: 48px; }
+    .section-title { margin: 8px 0 4px; font-weight: 700; font-size: 13px; color: var(--sub); }
+    .settings-row.column { flex-direction: column; align-items: flex-start; }
     .settings-panel h3 { margin: 0 0 8px; font-size: 15px; }
     .settings-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .settings-row button {
@@ -1035,15 +1037,12 @@
       <div class="settings-profile">
         <div class="settings-avatar-preview" id="settings-avatar-wrap">
           <img id="settings-avatar" alt="avatar" />
+          <input type="file" accept="image/*" id="avatar-input" style="display:none;" />
         </div>
         <div class="settings-profile-fields">
           <input id="settings-username" class="profile-input" placeholder="Имя аккаунта" />
           <textarea id="about-input" class="profile-input" placeholder="О себе"></textarea>
         </div>
-      </div>
-      <div class="settings-row" style="margin-bottom:6px;">
-        <button id="btn-avatar" class="secondary">🖼️ Изменить аватар</button>
-        <input type="file" accept="image/*" id="avatar-input" style="display:none;" />
       </div>
       <div class="status">Статус</div>
       <div class="settings-row">
@@ -1051,6 +1050,12 @@
         <button data-status="chat">💬 Готов поболтать</button>
         <button data-status="dnd">⛔️ Не беспокоить</button>
         <button data-status="offline">🔴 Отключен</button>
+      </div>
+      <div class="section-title">Аккаунт</div>
+      <div class="settings-row column" style="gap:6px;">
+        <button class="secondary" disabled title="Скоро">Конфиденциальность</button>
+        <button class="secondary" disabled title="Скоро">Блокированные</button>
+        <button class="secondary" disabled title="Скоро">Устройства</button>
       </div>
       <div class="push-status" id="push-status">Уведомления: неизвестно</div>
       <div class="settings-row" style="margin-top:6px;">
