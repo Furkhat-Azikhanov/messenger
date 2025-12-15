@@ -1075,6 +1075,7 @@
     let recorderChunks = [];
     let pendingVoiceFile = null;
     let recordStart = 0;
+    let wavFallback = null;
     let currentReply = null; // {id, isGroup}
     let pendingOffer = null;
     function currentChatKey() {
@@ -1361,6 +1362,60 @@
       document.addEventListener('touchstart', resume, true);
       document.addEventListener('click', resume, true);
     }
+
+    function floatToWav(float32Array, sampleRate) {
+      const buffer = new ArrayBuffer(44 + float32Array.length * 2);
+      const view = new DataView(buffer);
+      let offset = 0;
+      const writeString = (s) => { for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); offset += s.length; };
+      writeString('RIFF');
+      view.setUint32(offset, 36 + float32Array.length * 2, true); offset += 4;
+      writeString('WAVEfmt ');
+      view.setUint32(offset, 16, true); offset += 4; // PCM chunk size
+      view.setUint16(offset, 1, true); offset += 2; // audio format PCM
+      view.setUint16(offset, 1, true); offset += 2; // channels
+      view.setUint32(offset, sampleRate, true); offset += 4;
+      const byteRate = sampleRate * 2;
+      view.setUint32(offset, byteRate, true); offset += 4;
+      view.setUint16(offset, 2, true); offset += 2; // block align
+      view.setUint16(offset, 16, true); offset += 2; // bits per sample
+      writeString('data');
+      view.setUint32(offset, float32Array.length * 2, true); offset += 4;
+      for (let i = 0; i < float32Array.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function createWavRecorder(stream) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const chunks = [];
+      const sampleRate = ctx.sampleRate;
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(input));
+      };
+      source.connect(processor);
+      processor.connect(ctx.destination);
+      return {
+        async stop() {
+          processor.disconnect();
+          source.disconnect();
+          stream.getTracks().forEach(t => t.stop());
+          const total = chunks.reduce((a, c) => a + c.length, 0);
+          const merged = new Float32Array(total);
+          let offset = 0;
+          for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+          const blob = floatToWav(merged, sampleRate);
+          await ctx.close();
+          return blob;
+        },
+        stream,
+      };
+    }
     async function startVoiceRecording() {
       if (!navigator.mediaDevices?.getUserMedia) {
         setChatStatus('Браузер не поддерживает запись');
@@ -1374,31 +1429,58 @@
           'audio/mp4;codecs=aac',
           'audio/mp4',
           'audio/mpeg',
-          // нижние варианты хуже поддерживаются Safari, оставляем как запасные
-          'audio/webm;codecs=opus',
-          'audio/ogg;codecs=opus',
-          'audio/webm',
+          'audio/wav',
         ];
         const chosenMime = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
-        recorder = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
-        recorder._chosenMime = chosenMime;
-        recordStart = Date.now();
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) recorderChunks.push(e.data);
-        };
-        recorder.onstop = () => {
-          const guessed = recorder._chosenMime || recorder.mimeType || (recorderChunks[0]?.type) || 'audio/webm';
-          const blob = new Blob(recorderChunks, { type: guessed });
-          recorder.stream.getTracks().forEach(t => t.stop());
-          recorder = null;
-          if (blob.size === 0) return;
+        if (chosenMime) {
+          recorder = new MediaRecorder(stream, { mimeType: chosenMime });
+          recorder._chosenMime = chosenMime;
+          recordStart = Date.now();
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recorderChunks.push(e.data);
+          };
+          recorder.onstop = () => {
+            const guessed = recorder._chosenMime || recorder.mimeType || (recorderChunks[0]?.type) || 'audio/mp4';
+            const blob = new Blob(recorderChunks, { type: guessed });
+            recorder.stream.getTracks().forEach(t => t.stop());
+            recorder = null;
+            if (blob.size === 0) return;
+            const dur = ((Date.now() - recordStart) / 1000).toFixed(1);
+            const mime = guessed.toLowerCase();
+            const ext = mime.includes('mp4') || mime.includes('aac') ? 'm4a'
+              : mime.includes('mpeg') ? 'mp3'
+              : mime.includes('ogg') ? 'ogg'
+              : mime.includes('wav') ? 'wav'
+              : 'webm';
+            pendingVoiceFile = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+            if (fileChip) {
+              fileChip.textContent = `Голосовое: ${dur} c`;
+              const clearBtn = document.createElement('button');
+              clearBtn.textContent = '🗑';
+              clearBtn.onclick = cancelVoice;
+              fileChip.appendChild(clearBtn);
+              fileChip.classList.remove('hidden');
+            }
+          };
+          recorder.start();
+        } else {
+          wavFallback = createWavRecorder(stream);
+          recordStart = Date.now();
+        }
+        if (micBtn) micBtn.classList.add('recording');
+        setChatStatus('Запись...');
+      } catch (e) {
+        setChatStatus('Нет доступа к микрофону');
+      }
+    }
+    async function stopVoiceRecording() {
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      } else if (wavFallback) {
+        try {
+          const blob = await wavFallback.stop();
           const dur = ((Date.now() - recordStart) / 1000).toFixed(1);
-          const mime = guessed.toLowerCase();
-          const ext = mime.includes('mp4') || mime.includes('aac') ? 'm4a'
-            : mime.includes('mpeg') ? 'mp3'
-            : mime.includes('ogg') ? 'ogg'
-            : 'webm';
-          pendingVoiceFile = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+          pendingVoiceFile = new File([blob], `voice-${Date.now()}.wav`, { type: 'audio/wav' });
           if (fileChip) {
             fileChip.textContent = `Голосовое: ${dur} c`;
             const clearBtn = document.createElement('button');
@@ -1407,17 +1489,8 @@
             fileChip.appendChild(clearBtn);
             fileChip.classList.remove('hidden');
           }
-        };
-        recorder.start();
-        if (micBtn) micBtn.classList.add('recording');
-        setChatStatus('Запись...');
-      } catch (e) {
-        setChatStatus('Нет доступа к микрофону');
-      }
-    }
-    function stopVoiceRecording() {
-      if (recorder && recorder.state !== 'inactive') {
-        recorder.stop();
+        } catch (_) {}
+        wavFallback = null;
       }
       if (micBtn) micBtn.classList.remove('recording');
       setChatStatus('Онлайн чат');
@@ -2814,7 +2887,7 @@
     if (replyCancel) replyCancel.onclick = clearReply;
     if (micBtn) {
       const start = (e) => { e.preventDefault(); startVoiceRecording(); };
-      const stop = (e) => { e.preventDefault(); stopVoiceRecording(); };
+      const stop = async (e) => { e.preventDefault(); await stopVoiceRecording(); };
       micBtn.addEventListener('mousedown', start);
       micBtn.addEventListener('mouseup', stop);
       micBtn.addEventListener('mouseleave', stop);
